@@ -1,0 +1,16 @@
+parameters:
+    level: 4
+    paths:
+        - src
+    excludePaths:
+        - tests
+        - src/Support
+    ignoreErrors:
+        - '#Call to an undefined method#'
+        - '#Property .* has no type specified#'
+        - '#Method .* has parameter .* with no type specified#'
+        - '#Parameter .* expects .* given#'
+        - '#Method .* should return .* but returns#'
+        - '#Cannot call method .* on .*#'
+        - '#Access to an undefined property#'
+        - '#Element .* attribute .*: The attribute .* is not allowed#' 

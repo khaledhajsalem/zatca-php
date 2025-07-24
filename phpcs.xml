@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<ruleset name="ZATCA PHP Package">
+    <description>PSR-12 coding standards for ZATCA PHP Package</description>
+
+    <file>src</file>
+    <exclude-pattern>tests</exclude-pattern>
+    <exclude-pattern>vendor</exclude-pattern>
+
+    <rule ref="PSR12"/>
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="120"/>
+            <property name="absoluteLineLimit" value="150"/>
+        </properties>
+    </rule>
+
+    <rule ref="PSR1.Classes.ClassDeclaration"/>
+    <rule ref="PSR1.Methods.CamelCapsMethodName"/>
+    <rule ref="PSR1.Files.SideEffects"/>
+
+    <rule ref="PSR2.Classes.ClassDeclaration"/>
+    <rule ref="PSR2.Classes.PropertyDeclaration"/>
+    <rule ref="PSR2.Classes.MethodDeclaration"/>
+    <rule ref="PSR2.Files.EndFileNewline"/>
+    <rule ref="PSR2.Files.ClosingTag"/>
+    <rule ref="PSR2.Methods.FunctionCallSignature"/>
+    <rule ref="PSR2.Methods.FunctionClosingBrace"/>
+    <rule ref="PSR2.Methods.MethodDeclaration"/>
+    <rule ref="PSR2.ControlStructures.ControlStructureSpacing"/>
+    <rule ref="PSR2.ControlStructures.ElseIfDeclaration"/>
+    <rule ref="PSR2.ControlStructures.SwitchDeclaration"/>
+    <rule ref="PSR2.Namespaces.NamespaceDeclaration"/>
+    <rule ref="PSR2.Namespaces.UseDeclaration"/>
+</ruleset> 

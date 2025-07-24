@@ -1,0 +1,43 @@
+# Composer
+/vendor/
+composer.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Testing
+/coverage/
+.phpunit.result.cache
+
+# Build
+/build/
+/dist/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Certificate files (for security)
+*.pem
+*.crt
+*.csr
+*.key
+
+# Environment files
+.env
+.env.local
+.env.testing
+
+# Cache
+/cache/
+*.cache 
