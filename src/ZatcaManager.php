@@ -236,9 +236,6 @@ class ZatcaManager
      * Based on ZATCA requirements:
      * - Standard Tax Invoice (388 with name "0100000") - Requires clearance
      * - Simplified Tax Invoice (388 with name "0200000") - No clearance required
-     * - Debit Note (383) - No clearance required
-     * - Credit Note (381) - No clearance required
-     * - Prepayment Invoice (386) - No clearance required
      */
     private function isClearanceRequired(InvoiceData $invoiceData): bool
     {
