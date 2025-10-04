@@ -63,21 +63,33 @@ $invoiceData->setInvoiceNumber('INV-001')
 // Set seller information
 $seller = new SellerData();
 $seller->setRegistrationName('Your Company Name')
-    ->setPartyIdentification('1020304050') //
-    ->setVatNumber('3000000000000003')
+    ->setVatNumber('399999999900003')
+    ->setPartyIdentification('1010203020') // Commercial Registration Number
     ->setPartyIdentificationId('CRN') // Commercial Registration Number
     ->setAddress('123 Main Street, Riyadh, Saudi Arabia')
-    ->setCountryCode('SA');
+    ->setCountryCode('SA')
+    ->setCityName('Riyadh')
+    ->setPostalZone('12345')
+    ->setStreetName('Main Street')
+    ->setBuildingNumber('123')
+    ->setPlotIdentification('PLOT-001')
+    ->setCitySubdivisionName('District 1');
 
 $invoiceData->setSeller($seller);
 
 // Set buyer information
 $buyer = new BuyerData();
 $buyer->setRegistrationName('Customer Company')
-    ->setPartyIdentification('3000000000000003') // VAT/Tax number
-    ->setPartyIdentificationId('TIN') // Tax Identification Number
+    ->setPartyIdentification('1010203010') // Commercial Registration Number
+    ->setPartyIdentificationId('CRN') // Commercial Registration Number
     ->setAddress('456 Customer Street, Jeddah, Saudi Arabia')
-    ->setCountryCode('SA');
+    ->setCountryCode('SA')
+    ->setCityName('Jeddah')
+    ->setPostalZone('54321')
+    ->setStreetName('Customer Street')
+    ->setBuildingNumber('456')
+    ->setPlotIdentification('PLOT-002')
+    ->setCitySubdivisionName('District 2');
 
 $invoiceData->setBuyer($buyer);
 
