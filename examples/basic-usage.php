@@ -52,8 +52,8 @@ try {
     $buyer = new BuyerData();
     $buyer->setRegistrationName('Customer Company')
         ->setVatNumber('300000000000003')
-        ->setPartyIdentification('300000000000003')
-        ->setPartyIdentificationId('TIN') // Tax Identification Number
+        ->setPartyIdentification('1010203030')
+        ->setPartyIdentificationId('CRN') // Commercial Registration Number
         ->setAddress('456 Customer Street, Jeddah, Saudi Arabia')
         ->setCountryCode('SA')
         ->setCityName('Jeddah')
@@ -94,15 +94,41 @@ try {
     $result = $zatcaManager->processInvoice($invoiceData);
 
     // 8. Display results
-    echo "Invoice processed successfully!\n";
-    echo "QR Code: " . $result['qr_code'] . "\n";
-    echo "Invoice Hash: " . $result['invoice_hash'] . "\n";
-    echo "UUID: " . $result['uuid'] . "\n";
-    echo "Is Clearance Required: " . ($result['is_clearance_required'] ? 'Yes' : 'No') . "\n";
-    
-    // Save the signed XML to a file
-    file_put_contents('signed-invoice.xml', $result['xml']);
-    echo "Signed XML saved to: signed-invoice.xml\n";
+    $qrRaw       = isset($result['qr_code']) ? (string)$result['qr_code'] : '';
+    $invoiceHash = $result['invoice_hash'] ?? '';
+    $uuid        = $result['uuid'] ?? '';
+    $isClearance = !empty($result['is_clearance_required']);
+    $responsePretty = json_encode($result['response'] ?? new stdClass(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $xmlSavedPath = 'signed-invoice.xml';
+
+    echo '<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#0e1430;color:#eef3ff;margin:16px}
+  .card{max-width:900px;margin:auto;background:#121a33;border:1px solid #1f2a4d;border-radius:12px;overflow:hidden}
+  .head{padding:14px 16px;background:#0b1026;border-bottom:1px solid #1f2a4d;font-weight:700}
+  .tbl{width:100%;border-collapse:collapse}
+  .tbl th,.tbl td{padding:10px 12px;border-top:1px solid #1f2a4d;font-size:14px;vertical-align:top}
+  .tbl th{width:220px;color:#cfe0ff;text-align:left;background:#0f1738}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #1f2a4d;background:#1b2547;color:#cfe0ff;font-family:monospace}
+  .ok{color:#17c964;font-weight:700}
+  .warn{color:#f5a524;font-weight:700}
+  .btn{display:inline-block;margin:12px 0 0 16px;padding:8px 12px;border:1px solid #1f2a4d;border-radius:8px;background:#0b1430;color:#fff;text-decoration:none}
+  pre{margin:0;padding:12px 16px;background:#0a0f23;border-top:1px solid #1f2a4d;color:#d9e3ff;overflow:auto}
+</style>';
+
+echo '<div class="card">';
+echo '  <div class="head">Invoice processed successfully</div>';
+echo '  <table class="tbl">';
+echo '    <tr><th width="30%">Status</th><td><span class="ok">Success</span></td></tr>';
+echo '    <tr><th width="30%">Clearance Required</th><td><span class="'.($isClearance?'warn':'ok').'">'.($isClearance?'Yes':'No').'</span></td></tr>';
+echo '    <tr><th width="30%">UUID</th><td><span class="pill">'.esc($uuid).'</span></td></tr>';
+echo '    <tr><th width="30%">Invoice Hash</th><td><span class="pill">'.esc($invoiceHash).'</span></td></tr>';
+echo '    <tr><th width="30%">QR (raw)</th><td><span class="pill">'.esc(trunc($qrRaw, 140)).'</span></td></tr>';
+echo '    <tr><th width="30%">Signed XML</th><td><a class="btn" href="'.esc($xmlSavedPath).'" download>⬇️ Download signed-invoice.xml</a></td></tr>';
+echo '  </table>';
+
+echo '  <div class="head" style="border-top:1px solid #1f2a4d;">ZATCA API Response</div>';
+echo '  <pre>'.esc($responsePretty).'</pre>';
+echo '</div>';
 
 } catch (ZatcaException $e) {
     echo "ZATCA Error: " . $e->getMessage() . "\n";
@@ -110,3 +136,8 @@ try {
 } catch (Exception $e) {
     echo "General Error: " . $e->getMessage() . "\n";
 } 
+
+
+
+function esc($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
+function trunc($v,$len=120){ $v=(string)$v; return mb_strlen($v)>$len ? mb_substr($v,0,$len).'…' : $v; }

@@ -263,7 +263,8 @@ $invoiceData->setInvoiceNumber('INV-001')
 ```php
 $seller = new SellerData();
 $seller->setRegistrationName('Your Company Name')
-    ->setPartyIdentification('123456789012345') // VAT/Tax number
+    ->setVatNumber('399999999900003')
+    ->setPartyIdentification('1010203020') // Commercial Registration Number
     ->setPartyIdentificationId('CRN') // Commercial Registration Number
     ->setAddress('123 Main Street, Riyadh, Saudi Arabia')
     ->setCountryCode('SA')
@@ -280,8 +281,8 @@ $seller->setRegistrationName('Your Company Name')
 ```php
 $buyer = new BuyerData();
 $buyer->setRegistrationName('Customer Company')
-    ->setPartyIdentification('987654321098765') // VAT/Tax number
-    ->setPartyIdentificationId('TIN') // Tax Identification Number
+    ->setPartyIdentification('1010203010') // Commercial Registration Number
+    ->setPartyIdentificationId('CRN') // Commercial Registration Number
     ->setAddress('456 Customer Street, Jeddah, Saudi Arabia')
     ->setCountryCode('SA')
     ->setCityName('Jeddah')

@@ -172,15 +172,19 @@ class ZatcaInvoice
         $pihBinaryObject = $this->appendElement($dom, $pihAttachment, 'cbc:EmbeddedDocumentBinaryObject', $pihValue);
         $pihBinaryObject->setAttribute('mimeCode', 'text/plain');
         $pihBinaryObject->setAttribute('filename', 'base64');
-        
-        // Add custom document references
-        foreach ($invoiceData->getDocumentReferences() as $reference) {
-            $documentReference = $dom->createElement('cac:AdditionalDocumentReference');
-            $this->appendElement($dom, $documentReference, 'cbc:ID', $reference['id'] ?? '');
-            $this->appendElement($dom, $documentReference, 'cbc:DocumentType', $reference['type'] ?? '');
-            $rootInvoice->appendChild($documentReference);
-        }
-        
+
+        // Add empty QR (QR Code) element AdditionalDocumentReference (will be replaced with the actual QR code later in signer)
+        $qrAdditionalDocRef = $dom->createElement('cac:AdditionalDocumentReference');
+        $rootInvoice->appendChild($qrAdditionalDocRef);
+        $this->appendElement($dom, $qrAdditionalDocRef, 'cbc:ID', 'QR');
+
+        $attachment = $dom->createElement('cac:Attachment');
+        $qrAdditionalDocRef->appendChild($attachment);
+
+        $qrBinaryObject = $this->appendElement($dom, $attachment, 'cbc:EmbeddedDocumentBinaryObject', '');
+        $qrBinaryObject->setAttribute('mimeCode', 'text/plain');
+        $qrBinaryObject->setAttribute('filename', 'base64');
+
         // Add custom document references
         foreach ($invoiceData->getDocumentReferences() as $reference) {
             $documentReference = $dom->createElement('cac:AdditionalDocumentReference');
