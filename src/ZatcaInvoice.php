@@ -362,6 +362,7 @@ class ZatcaInvoice
         if (empty($invoiceData->getPaymentMeans())) {
             $paymentMeansElement = $dom->createElement('cac:PaymentMeans');
             $this->appendElement($dom, $paymentMeansElement, 'cbc:PaymentMeansCode', '10');
+            $this->appendElement($dom, $paymentMeansElement, 'cbc:InstructionNote', 'إلغاء أو تعليق التوريدات بعد حدوثها كليًا أو جزئيًا');
             $rootInvoice->appendChild($paymentMeansElement);
         } else {
             foreach ($invoiceData->getPaymentMeans() as $paymentMeans) {
@@ -369,6 +370,7 @@ class ZatcaInvoice
                 $this->appendElement($dom, $paymentMeansElement, 'cbc:ID', $paymentMeans['id'] ?? '1');
                 $this->appendElement($dom, $paymentMeansElement, 'cbc:PaymentMeansCode', $paymentMeans['code'] ?? '10');
                 $this->appendElement($dom, $paymentMeansElement, 'cbc:PaymentDueDate', $paymentMeans['due_date'] ?? $invoiceData->getDueDate());
+                $this->appendElement($dom, $paymentMeansElement, 'cbc:InstructionNote', $paymentMeans['instruction_note'] ?? 'إلغاء أو تعليق التوريدات بعد حدوثها كليًا أو جزئيًا');
                 
                 if (isset($paymentMeans['amount'])) {
                     $paymentMeansElement->appendChild($dom->createElement('cbc:PaymentChannelCode', ''));
