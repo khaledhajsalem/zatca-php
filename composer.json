@@ -2,7 +2,7 @@
     "name": "khaledhajsalem/zatca-php",
     "description": "A comprehensive PHP package for ZATCA (Saudi Arabia e-invoicing) invoice processing, signing, and submission",
     "type": "library",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "license": "MIT",
     "authors": [
         {
