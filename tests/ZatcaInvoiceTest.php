@@ -169,4 +169,176 @@ class ZatcaInvoiceTest extends TestCase
         $this->assertEquals(287.50, $invoiceData->getTaxInclusiveAmount()); // 250 + 37.5
         $this->assertEquals(287.50, $invoiceData->getPayableAmount());
     }
-} 
+
+    /**
+     * Test that InstructionNote is NOT included for Standard Tax Invoice (388)
+     * per ZATCA requirement BR-KSA-17
+     */
+    public function testInstructionNoteNotIncludedForStandardInvoice()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->setInvoiceNumber('INV-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setCurrencyCode('SAR')
+            ->setInvoiceTypeCode('388') // Standard Tax Invoice
+            ->setDocumentCurrencyCode('SAR');
+
+        $seller = new SellerData();
+        $seller->setRegistrationName('Test Company')
+            ->setVatNumber('123456789012345')
+            ->setCountryCode('SA');
+        $invoiceData->setSeller($seller);
+
+        $buyer = new BuyerData();
+        $buyer->setRegistrationName('Customer Company')
+            ->setVatNumber('987654321098765')
+            ->setCountryCode('SA');
+        $invoiceData->setBuyer($buyer);
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Test Product')
+            ->setQuantity(1)
+            ->setUnitPrice(100.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+
+        // InstructionNote should NOT be present for standard invoice (388)
+        $this->assertStringNotContainsString('إلغاء أو تعليق التوريدات', $xml);
+    }
+
+    /**
+     * Test that InstructionNote IS included for Debit Note (383)
+     * per ZATCA requirement BR-KSA-17
+     */
+    public function testInstructionNoteIncludedForDebitNote()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->setInvoiceNumber('DN-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setCurrencyCode('SAR')
+            ->setInvoiceTypeCode('383') // Debit Note
+            ->setDocumentCurrencyCode('SAR');
+
+        $seller = new SellerData();
+        $seller->setRegistrationName('Test Company')
+            ->setVatNumber('123456789012345')
+            ->setCountryCode('SA');
+        $invoiceData->setSeller($seller);
+
+        $buyer = new BuyerData();
+        $buyer->setRegistrationName('Customer Company')
+            ->setVatNumber('987654321098765')
+            ->setCountryCode('SA');
+        $invoiceData->setBuyer($buyer);
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Additional Charge')
+            ->setQuantity(1)
+            ->setUnitPrice(25.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+
+        // InstructionNote SHOULD be present for debit note (383)
+        $this->assertStringContainsString('إلغاء أو تعليق التوريدات', $xml);
+    }
+
+    /**
+     * Test that InstructionNote IS included for Credit Note (381)
+     * per ZATCA requirement BR-KSA-17
+     */
+    public function testInstructionNoteIncludedForCreditNote()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->setInvoiceNumber('CN-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setCurrencyCode('SAR')
+            ->setInvoiceTypeCode('381') // Credit Note
+            ->setDocumentCurrencyCode('SAR');
+
+        $seller = new SellerData();
+        $seller->setRegistrationName('Test Company')
+            ->setVatNumber('123456789012345')
+            ->setCountryCode('SA');
+        $invoiceData->setSeller($seller);
+
+        $buyer = new BuyerData();
+        $buyer->setRegistrationName('Customer Company')
+            ->setVatNumber('987654321098765')
+            ->setCountryCode('SA');
+        $invoiceData->setBuyer($buyer);
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Return')
+            ->setQuantity(1)
+            ->setUnitPrice(50.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+
+        // InstructionNote SHOULD be present for credit note (381)
+        $this->assertStringContainsString('إلغاء أو تعليق التوريدات', $xml);
+    }
+
+    /**
+     * Test that InstructionNote is NOT included for Prepayment Invoice (386)
+     * per ZATCA requirement BR-KSA-17
+     */
+    public function testInstructionNoteNotIncludedForPrepaymentInvoice()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->setInvoiceNumber('PP-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setCurrencyCode('SAR')
+            ->setInvoiceTypeCode('386') // Prepayment Invoice
+            ->setDocumentCurrencyCode('SAR');
+
+        $seller = new SellerData();
+        $seller->setRegistrationName('Test Company')
+            ->setVatNumber('123456789012345')
+            ->setCountryCode('SA');
+        $invoiceData->setSeller($seller);
+
+        $buyer = new BuyerData();
+        $buyer->setRegistrationName('Customer Company')
+            ->setVatNumber('987654321098765')
+            ->setCountryCode('SA');
+        $invoiceData->setBuyer($buyer);
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Advance Payment')
+            ->setQuantity(1)
+            ->setUnitPrice(500.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+
+        // InstructionNote should NOT be present for prepayment invoice (386)
+        $this->assertStringNotContainsString('إلغاء أو تعليق التوريدات', $xml);
+    }
+}
