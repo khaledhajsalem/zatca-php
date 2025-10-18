@@ -361,14 +361,26 @@ class ZatcaInvoice
 
     /**
      * Add payment information.
+     *
+     * Note: InstructionNote is only required for Debit Notes (383) and Credit Notes (381)
+     * per ZATCA requirement BR-KSA-17
      */
     protected function addPaymentInformation(DOMDocument $dom, DOMElement $rootInvoice, InvoiceData $invoiceData): void
     {
+        // Check if InstructionNote should be included (only for debit/credit notes)
+        $invoiceTypeCode = $invoiceData->getInvoiceTypeCode();
+        $shouldIncludeInstructionNote = in_array($invoiceTypeCode, ['383', '381']);
+
         // Add default payment means if none provided
         if (empty($invoiceData->getPaymentMeans())) {
             $paymentMeansElement = $dom->createElement('cac:PaymentMeans');
             $this->appendElement($dom, $paymentMeansElement, 'cbc:PaymentMeansCode', '10');
-            $this->appendElement($dom, $paymentMeansElement, 'cbc:InstructionNote', 'إلغاء أو تعليق التوريدات بعد حدوثها كليًا أو جزئيًا');
+
+            // Only add InstructionNote for debit/credit notes (BR-KSA-17)
+            if ($shouldIncludeInstructionNote) {
+                $this->appendElement($dom, $paymentMeansElement, 'cbc:InstructionNote', 'إلغاء أو تعليق التوريدات بعد حدوثها كليًا أو جزئيًا');
+            }
+
             $rootInvoice->appendChild($paymentMeansElement);
         } else {
             foreach ($invoiceData->getPaymentMeans() as $paymentMeans) {
@@ -376,13 +388,17 @@ class ZatcaInvoice
                 $this->appendElement($dom, $paymentMeansElement, 'cbc:ID', $paymentMeans['id'] ?? '1');
                 $this->appendElement($dom, $paymentMeansElement, 'cbc:PaymentMeansCode', $paymentMeans['code'] ?? '10');
                 $this->appendElement($dom, $paymentMeansElement, 'cbc:PaymentDueDate', $paymentMeans['due_date'] ?? $invoiceData->getDueDate());
-                $this->appendElement($dom, $paymentMeansElement, 'cbc:InstructionNote', $paymentMeans['instruction_note'] ?? 'إلغاء أو تعليق التوريدات بعد حدوثها كليًا أو جزئيًا');
-                
+
+                // Only add InstructionNote for debit/credit notes (BR-KSA-17)
+                if ($shouldIncludeInstructionNote) {
+                    $this->appendElement($dom, $paymentMeansElement, 'cbc:InstructionNote', $paymentMeans['instruction_note'] ?? 'إلغاء أو تعليق التوريدات بعد حدوثها كليًا أو جزئيًا');
+                }
+
                 if (isset($paymentMeans['amount'])) {
                     $paymentMeansElement->appendChild($dom->createElement('cbc:PaymentChannelCode', ''));
                     $paymentMeansElement->appendChild($dom->createElement('cbc:PaymentID', ''));
                 }
-                
+
                 $rootInvoice->appendChild($paymentMeansElement);
             }
         }
