@@ -14,27 +14,22 @@ use KhaledHajSalem\Zatca\Exceptions\ZatcaException;
 /**
  * ZATCA Invoice Types:
  * 
- * 1. Standard Tax Invoice (B2B/B2G):
- *    - invoice_type_code = 388
+ * Standard Tax Invoice (B2B/B2G):
  *    - invoice_type_name = "0100000"
  *    - Requires clearance before distribution
  * 
- * 2. Simplified Tax Invoice (B2C):
- *    - invoice_type_code = 388
+ * Simplified Tax Invoice (B2C):
  *    - invoice_type_name = "0200000"
  *    - No clearance required, report within 24 hours
  * 
- * 3. Debit Note:
+ * Debit Note: (standard or simplified)
  *    - invoice_type_code = 383
- *    - No clearance required
  * 
- * 4. Credit Note:
+ * Credit Note: (standard or simplified)
  *    - invoice_type_code = 381
- *    - No clearance required
  * 
- * 5. Prepayment Invoice:
+ * Prepayment Invoice:
  *    - invoice_type_code = 386
- *    - No clearance required
  */
 
 try {
@@ -63,11 +58,11 @@ try {
     echo "=== Standard Tax Invoice (B2B) - Requires Clearance ===\n";
     $standardInvoice = new InvoiceData();
     $standardInvoice->setInvoiceNumber('INV-001')
-        ->setIssueDate('2025-07-15')
+        ->standard() // Standard Invoice
+        ->taxInvoice() // Tax Invoice (388)
+        ->setIssueDate('2025-09-15')
         ->setIssueTime('10:30:00')
         ->setCurrencyCode('SAR')
-        ->setInvoiceTypeCode('388')
-        ->setInvoiceTypeName('0100000') // Standard Tax Invoice
         ->setSeller($seller)
         ->setBuyer($buyer);
 
@@ -90,11 +85,11 @@ try {
     echo "=== Simplified Tax Invoice (B2C) - No Clearance Required ===\n";
     $simplifiedInvoice = new InvoiceData();
     $simplifiedInvoice->setInvoiceNumber('INV-002')
-        ->setIssueDate('2025-07-15')
+        ->simplified() // Simplified Invoice
+        ->taxInvoice() // Tax Invoice (388)
+        ->setIssueDate('2025-09-15')
         ->setIssueTime('10:30:00')
         ->setCurrencyCode('SAR')
-        ->setInvoiceTypeCode('388')
-        ->setInvoiceTypeName('0200000') // Simplified Tax Invoice
         ->setSeller($seller)
         ->setBuyer($buyer);
 
@@ -114,13 +109,24 @@ try {
     echo "QR Code: " . $result['qr_code'] . "\n\n";
 
     // Example 3: Debit Note - No Clearance Required
-    echo "=== Debit Note - No Clearance Required ===\n";
+    echo "=== Standard or Simplified Debit Note - Requires Clearance if Standard ===\n";
     $debitNote = new InvoiceData();
     $debitNote->setInvoiceNumber('DN-001')
-        ->setIssueDate('2024-01-15')
+        ->standard() // Standard Invoice or replace with simplified() for simplified invoice
+        ->debitNote() // Debit Note (383)
+        ->setIssueDate('2025-09-15')
         ->setIssueTime('10:30:00')
         ->setCurrencyCode('SAR')
-        ->setInvoiceTypeCode('383') // Debit Note
+        ->addBillingReference([ // add the original invoice reference in credit or debit notes
+            'id' => 'INV-001',
+            'uuid' => '63decc4e-cc4d-4e3b-878c-b772560bb5f1'
+        ])
+        ->addPaymentMeans([ // Payment Means is optional, add it in credit or debit notes
+            'id' => '1234567890',
+            'code' => '10',
+            'due_date' => '2025-09-15',
+            'instruction_note' => "Addition" // Addition, Correction, Returns, etc.
+        ])
         ->setSeller($seller)
         ->setBuyer($buyer);
 
@@ -140,13 +146,24 @@ try {
     echo "QR Code: " . $result['qr_code'] . "\n\n";
 
     // Example 4: Credit Note - No Clearance Required
-    echo "=== Credit Note - No Clearance Required ===\n";
+    echo "=== Standard or Simplified Credit Note - Requires Clearance if Standard ===\n";
     $creditNote = new InvoiceData();
     $creditNote->setInvoiceNumber('CN-001')
-        ->setIssueDate('2024-01-15')
+        ->standard() // Standard Invoice or replace with simplified() for simplified invoice
+        ->creditNote() // Credit Note (381)
+        ->setIssueDate('2025-09-15')
         ->setIssueTime('10:30:00')
         ->setCurrencyCode('SAR')
-        ->setInvoiceTypeCode('381') // Credit Note
+        ->addBillingReference([ // add the original invoice reference in credit or debit notes
+            'id' => 'INV-001',
+            'uuid' => '63decc4e-cc4d-4e3b-878c-b772560bb5f1'
+        ])
+        ->addPaymentMeans([ // Payment Means is optional, add it in credit or debit notes
+            'id' => '1234567890',
+            'code' => '10',
+            'due_date' => '2025-09-15',
+            'instruction_note' => "Returns" // Addition, Correction, Returns, Cancellation, etc.
+        ])
         ->setSeller($seller)
         ->setBuyer($buyer);
 

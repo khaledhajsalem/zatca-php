@@ -23,12 +23,12 @@ try {
     // 2. Create invoice data
     $invoiceData = new InvoiceData();
     $invoiceData->setInvoiceNumber('INV-001')
+        ->standard() // Standard Invoice (requires clearance)
+        ->taxInvoice() // Tax Invoice (388)
         ->setIssueDate('2025-07-15')
         ->setIssueTime('10:30:00')
         ->setDueDate('2025-09-15')
         ->setCurrencyCode('SAR')
-        ->setInvoiceTypeCode('388') // Standard Tax Invoice
-        ->setInvoiceTypeName('0100000') // Standard Tax Invoice (requires clearance)
         ->setDocumentCurrencyCode('SAR');
 
     // 3. Set seller information
@@ -94,12 +94,16 @@ try {
     $result = $zatcaManager->processInvoice($invoiceData);
 
     // 8. Display results
+    $status     = $result['response']['validationResults']['status'] ?? '';
     $qrRaw       = isset($result['qr_code']) ? (string)$result['qr_code'] : '';
     $invoiceHash = $result['invoice_hash'] ?? '';
     $uuid        = $result['uuid'] ?? '';
     $isClearance = !empty($result['is_clearance_required']);
     $responsePretty = json_encode($result['response'] ?? new stdClass(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $xmlSavedPath = 'signed-invoice.xml';
+    if($status == 'PASS' || $status == 'WARNING'){
+        file_put_contents($xmlSavedPath, $result['xml']);
+    }
 
     echo '<style>
   body{font-family:Arial,Helvetica,sans-serif;background:#0e1430;color:#eef3ff;margin:16px}
@@ -116,9 +120,9 @@ try {
 </style>';
 
 echo '<div class="card">';
-echo '  <div class="head">Invoice processed successfully</div>';
+echo '  <div class="head">'.($status == 'PASS' || $status == 'WARNING' ? 'Invoice processed successfully' : 'Invoice processing failed').'</div>';
 echo '  <table class="tbl">';
-echo '    <tr><th width="30%">Status</th><td><span class="ok">Success</span></td></tr>';
+echo '    <tr><th width="30%">Status</th><td><span class="'.($status == 'PASS' ? 'ok' : 'warn').'">'.($status == 'PASS'  ? 'Success' : 'Error').'</span></td></tr>';
 echo '    <tr><th width="30%">Clearance Required</th><td><span class="'.($isClearance?'warn':'ok').'">'.($isClearance?'Yes':'No').'</span></td></tr>';
 echo '    <tr><th width="30%">UUID</th><td><span class="pill">'.esc($uuid).'</span></td></tr>';
 echo '    <tr><th width="30%">Invoice Hash</th><td><span class="pill">'.esc($invoiceHash).'</span></td></tr>';

@@ -455,30 +455,25 @@ try {
 The package supports all ZATCA invoice types with proper clearance handling:
 
 ### Standard Tax Invoice (B2B/B2G)
-- **Code:** `388`
 - **Name:** `"0100000"`
 - **Clearance:** Required before distribution
 - **Use Case:** Business-to-business or business-to-government transactions
 
 ### Simplified Tax Invoice (B2C)
-- **Code:** `388`
 - **Name:** `"0200000"`
 - **Clearance:** Not required, report within 24 hours
 - **Use Case:** Business-to-consumer transactions
 
 ### Debit Note
 - **Code:** `383`
-- **Clearance:** Not required
 - **Use Case:** Additional charges or corrections
 
 ### Credit Note
 - **Code:** `381`
-- **Clearance:** Not required
 - **Use Case:** Returns, refunds, or corrections
 
 ### Prepayment Invoice
 - **Code:** `386`
-- **Clearance:** Not required
 - **Use Case:** Advance payments
 
 ## Examples

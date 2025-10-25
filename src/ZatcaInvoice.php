@@ -140,6 +140,7 @@ class ZatcaInvoice
             $billingReference = $dom->createElement('cac:BillingReference');
             $invoiceDocumentReference = $dom->createElement('cac:InvoiceDocumentReference');
             $this->appendElement($dom, $invoiceDocumentReference, 'cbc:ID', $reference['id'] ?? '');
+            $this->appendElement($dom, $invoiceDocumentReference, 'cbc:UUID', $reference['uuid'] ?? '');
             $billingReference->appendChild($invoiceDocumentReference);
             $rootInvoice->appendChild($billingReference);
         }

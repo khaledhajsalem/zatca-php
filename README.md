@@ -47,17 +47,17 @@ use KhaledHajSalem\Zatca\Data\InvoiceLineData;
 
 // Create invoice data
 $invoiceData = new InvoiceData();
-$invoiceData->setInvoiceNumber('INV-001')
-    ->setIssueDate('2024-01-15')
+$invoiceData
+    ->standard() // Standard Invoice  or ->simplified() for simplified invoice
+    ->taxInvoice() // Standard Tax Invoice (type code 388)
+    ->setInvoiceNumber('INV-001')
+    ->setIssueDate('2025-09-15')
     ->setIssueTime('10:30:00')
-    ->setDueDate('2024-02-15')
+    ->setDueDate('2025-09-15')
     ->setCurrencyCode('SAR')
-    ->setInvoiceTypeCode('388') // Standard Tax Invoice
-    ->setInvoiceTypeName('0100000') // Standard Tax Invoice (requires clearance)
     ->setDocumentCurrencyCode('SAR')
     ->setTaxCurrencyCode('SAR')
     ->setInvoiceCounter('1')
-    ->setTransactionCode('0100000')
     ->setPreviousInvoiceHash('MA=='); // PIH: Previous Invoice Hash (base64 encoded "0" for first invoice)
 
 // Set seller information
@@ -112,7 +112,25 @@ $xml = $zatcaInvoice->generateXml($invoiceData);
 echo $xml;
 ```
 
-### 2. Certificate Management
+### 2. Invoice Signing
+
+```php
+
+use KhaledHajSalem\Zatca\InvoiceSigner;
+
+// Sign the invoice
+$signer = InvoiceSigner::signInvoice($xml, $certificate);
+
+$signedXml = $signer->getXML();
+$qrCode = $signer->getQRCode();
+$hash = $signer->getHash();
+
+echo "Signed XML: " . $signedXml;
+echo "QR Code: " . $qrCode;
+echo "Hash: " . $hash;
+```
+
+### 3. Certificate Signing Request Generation
 
 ```php
 use KhaledHajSalem\Zatca\CertificateBuilder;
@@ -129,7 +147,7 @@ $builder->setOrganizationIdentifier('300000000000003')
     ->setAddress('123 Main Street, Riyadh, Saudi Arabia')
     ->setInvoiceType(1100)
     ->setProduction(false) // true for production
-    ->setBusinessCategory('1000');
+    ->setBusinessCategory('Finance');
 
 $builder->generateAndSave('certificate.csr', 'private.pem');
 
@@ -139,23 +157,6 @@ $certificate = new Certificate(
     file_get_contents('private.pem'),
     'your-secret-key'
 );
-```
-
-### 3. Invoice Signing
-
-```php
-use KhaledHajSalem\Zatca\InvoiceSigner;
-
-// Sign the invoice
-$signer = InvoiceSigner::signInvoice($xml, $certificate);
-
-$signedXml = $signer->getXML();
-$qrCode = $signer->getQRCode();
-$hash = $signer->getHash();
-
-echo "Signed XML: " . $signedXml;
-echo "QR Code: " . $qrCode;
-echo "Hash: " . $hash;
 ```
 
 ### 4. ZATCA API Integration
@@ -250,17 +251,26 @@ $certConfig = [
 ```php
 $invoiceData = new InvoiceData();
 $invoiceData->setInvoiceNumber('INV-001')
-    ->setIssueDate('2024-01-15')
+    ->standard() // or simplified()
+    ->taxInvoice() // or debitNote(), creditNote(), prepaymentInvoice()
+    ->setIssueDate('2025-09-15')
     ->setIssueTime('10:30:00')
-    ->setDueDate('2024-02-15')
+    ->setDueDate('2025-11-15')
     ->setCurrencyCode('SAR')
-    ->setInvoiceTypeCode('388')
-    ->setInvoiceTypeName('0100000')
     ->setDocumentCurrencyCode('SAR')
     ->setTaxCurrencyCode('SAR')
     ->setInvoiceCounter('1')
-    ->setTransactionCode('0100000')
-    ->setPreviousInvoiceHash('MA==') // PIH: Previous Invoice Hash (base64 encoded "0")
+    ->setPreviousInvoiceHash('MA==') // PIH: Previous Invoice Hash
+    ->addBillingReference([ // add the original invoice reference in credit or debit notes
+            'id' => 'INV-001',
+            'uuid' => '63decc4e-cc4d-4e3b-878c-b772560bb5f1'
+        ])
+    ->addPaymentMeans([ // Payment Means is optional, add it in credit or debit notes
+            'id' => '1234567890',
+            'code' => '10',
+            'due_date' => '2025-09-15',
+            'instruction_note' => "Returns" // Addition, Correction, Returns, Cancellation, etc.
+    ])
     ->setLineCountNumeric(1)
     ->setTaxTotalAmount(30.00)
     ->setTaxExclusiveAmount(200.00)
@@ -311,12 +321,12 @@ The package supports flexible party identification with different scheme IDs for
 
 ```php
 // Seller with Commercial Registration Number
-$seller->setPartyIdentification('311111111111113')
+$seller->setPartyIdentification('1020304001')
        ->setPartyIdentificationId('CRN');
 
 // Buyer with Tax Identification Number
 $buyer->setPartyIdentification('300000000000003')
-      ->setPartyIdentificationId('TIN');
+      ->setPartyIdentificationId('VAT');
 
 // Buyer with National ID
 $buyer->setPartyIdentification('123456789012345')
@@ -328,6 +338,7 @@ $buyer->setPartyIdentification('987654321098765')
 ```
 
 **Available Scheme IDs:**
+- `VAT`: VAT Number
 - `CRN`: Commercial Registration Number
 - `TIN`: Tax Identification Number  
 - `NAT`: National ID
@@ -339,10 +350,6 @@ $buyer->setPartyIdentification('987654321098765')
 - `MLS`: MHRSD License
 - `SAG`: MISA License
 - `700`: 700 Number
-
-**Default Values:**
-- Sellers default to `CRN` (Commercial Registration Number)
-- Buyers default to `TIN` (Tax Identification Number)
 
 ### Previous Invoice Hash (PIH)
 

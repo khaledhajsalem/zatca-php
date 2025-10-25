@@ -234,16 +234,12 @@ class ZatcaManager
      * Determine if clearance is required based on invoice type.
      * 
      * Based on ZATCA requirements:
-     * - Standard Tax Invoice (388 with name "0100000") - Requires clearance
-     * - Simplified Tax Invoice (388 with name "0200000") - No clearance required
+     * - Standard Invoice ( name "0100000") - Requires clearance
+     * - Simplified Invoice ( with name "0200000") - No clearance required
      */
     private function isClearanceRequired(InvoiceData $invoiceData): bool
     {
-        $invoiceTypeCode = $invoiceData->getInvoiceTypeCode();
-        
-        // Only Standard Tax Invoice (388) with name "0100000" requires clearance
-        // Simplified Tax Invoice (388) with name "0200000" does not require clearance
-        return $invoiceTypeCode === '388' && $invoiceData->getInvoiceTypeName() === '0100000';
+        return $invoiceData->isStandard();
     }
 
     /**

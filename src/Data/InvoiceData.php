@@ -91,6 +91,61 @@ class InvoiceData
         return $this->currencyCode;
     }
 
+    public function simplified(): self
+    {
+        return $this->setInvoiceTypeName('0200000');
+    }
+
+    public function standard(): self
+    {
+        return $this->setInvoiceTypeName('0100000');
+    }
+
+    public function taxInvoice(): self
+    {
+        return $this->setInvoiceTypeCode('388');
+    }
+
+    public function debitNote(): self
+    {
+        return $this->setInvoiceTypeCode('383');
+    }
+
+    public function creditNote(): self
+    {
+        return $this->setInvoiceTypeCode('381');
+    }
+
+    public function prepaymentInvoice(): self
+    {
+        return $this->setInvoiceTypeCode('386');
+    }
+
+    public function isSimplified(): bool
+    {
+        return $this->invoiceTypeName === '0200000';
+    }
+
+    public function isStandard(): bool
+    {
+        return $this->invoiceTypeName === '0100000';
+    }
+
+    public function isDebitNote(): bool
+    {
+        return $this->invoiceTypeCode === '383';
+    }
+
+    public function isCreditNote(): bool
+    {
+        return $this->invoiceTypeCode === '381';
+    }
+
+    public function isCreditOrDebitNote(): bool
+    {
+        return $this->isDebitNote() || $this->isCreditNote();
+    }
+
     public function setInvoiceTypeCode(string $invoiceTypeCode): self
     {
         $this->invoiceTypeCode = $invoiceTypeCode;
