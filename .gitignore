@@ -33,6 +33,12 @@ Thumbs.db
 *.csr
 *.key
 
+# Allow certificate files in storage/ (example/sandbox certs)
+!/storage/*.pem
+!/storage/*.csr
+!/storage/*.crt
+!/storage/*.key
+
 # Environment files
 .env
 .env.local
