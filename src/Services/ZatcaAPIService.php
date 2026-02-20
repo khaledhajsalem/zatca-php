@@ -401,7 +401,11 @@ class ZatcaAPIService
      */
     private function formatCertificate(string $base64Certificate): string
     {
-        return base64_decode($base64Certificate);
+        $decoded = base64_decode($base64Certificate);
+
+        return "-----BEGIN CERTIFICATE-----\n"
+            . chunk_split($decoded, 64, "\n")
+            . "-----END CERTIFICATE-----";
     }
 
     /**

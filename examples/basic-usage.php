@@ -23,11 +23,11 @@ try {
     // 2. Create invoice data
     $invoiceData = new InvoiceData();
     $invoiceData->setInvoiceNumber('INV-001')
-        ->standard() // Standard Invoice (requires clearance)
+        ->simplified() // Standard Invoice (requires clearance)
         ->taxInvoice() // Tax Invoice (388)
-        ->setIssueDate('2025-07-15')
-        ->setIssueTime('10:30:00')
-        ->setDueDate('2025-09-15')
+        ->setIssueDate(date('Y-m-d'))
+        ->setIssueTime(date('H:i:s'))
+        ->setDueDate(date('Y-m-d'))
         ->setCurrencyCode('SAR')
         ->setDocumentCurrencyCode('SAR');
 
@@ -94,54 +94,344 @@ try {
     $result = $zatcaManager->processInvoice($invoiceData);
 
     // 8. Display results
-    $status     = $result['response']['validationResults']['status'] ?? '';
-    $qrRaw       = isset($result['qr_code']) ? (string)$result['qr_code'] : '';
+    $status = $result['response']['validationResults']['status'] ?? '';
+    $reportingStatus = $result['response']['reportingStatus'] ?? '';
+    $clearanceStatus = $result['response']['clearanceStatus'] ?? '';
+    $qrRaw = isset($result['qr_code']) ? (string)$result['qr_code'] : '';
     $invoiceHash = $result['invoice_hash'] ?? '';
-    $uuid        = $result['uuid'] ?? '';
+    $uuid = $result['uuid'] ?? '';
     $isClearance = !empty($result['is_clearance_required']);
-    $responsePretty = json_encode($result['response'] ?? new stdClass(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    
+    // Extract validation messages
+    $infoMessages = $result['response']['validationResults']['infoMessages'] ?? [];
+    $warningMessages = $result['response']['validationResults']['warningMessages'] ?? [];
+    $errorMessages = $result['response']['validationResults']['errorMessages'] ?? [];
+    
     $xmlSavedPath = 'signed-invoice.xml';
-    if($status == 'PASS' || $status == 'WARNING'){
-        file_put_contents($xmlSavedPath, $result['xml']);
+    file_put_contents($xmlSavedPath, $result['xml']);
+
+    $isSuccess = ($status === 'PASS' || $status === 'WARNING');
+    $statusColor = match($status) {
+        'PASS' => '#16a34a',
+        'WARNING' => '#ca8a04', 
+        'ERROR' => '#dc2626',
+        default => '#6b7280'
+    };
+
+    echo '<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZATCA Invoice Result</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            min-height: 100vh;
+            padding: 24px;
+            color: #1f2937;
+        }
+        .container { max-width: 960px; margin: 0 auto; }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px 16px 0 0;
+            padding: 24px 28px;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .header-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header p { font-size: 14px; opacity: 0.9; margin-top: 4px; }
+        
+        /* Card */
+        .card {
+            background: #ffffff;
+            border-radius: 0 0 16px 16px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        
+        /* Status Banner */
+        .status-banner {
+            padding: 16px 28px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 13px;
+        }
+        .status-pass { background: #dcfce7; color: #16a34a; }
+        .status-warning { background: #fef3c7; color: #ca8a04; }
+        .status-error { background: #fee2e2; color: #dc2626; }
+        
+        /* Info Grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1px;
+            background: #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .info-item {
+            background: #fff;
+            padding: 16px 28px;
+        }
+        .info-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+        .info-value {
+            font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+            font-size: 13px;
+            color: #374151;
+            word-break: break-all;
+            line-height: 1.5;
+        }
+        .info-value.highlight {
+            background: #f3f4f6;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        
+        /* Messages Section */
+        .messages-section {
+            padding: 20px 28px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .messages-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #374151;
+        }
+        .message-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .message-item:last-child { margin-bottom: 0; }
+        .message-info { background: #eff6ff; border-left: 3px solid #3b82f6; }
+        .message-warning { background: #fffbeb; border-left: 3px solid #f59e0b; }
+        .message-error { background: #fef2f2; border-left: 3px solid #ef4444; }
+        .message-code { 
+            font-family: monospace;
+            font-size: 11px;
+            background: rgba(0,0,0,0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+        
+        /* Actions */
+        .actions {
+            padding: 20px 28px;
+            background: #f9fafb;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+        .btn-secondary {
+            background: #fff;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        .btn-secondary:hover { background: #f9fafb; }
+        
+        /* Response Section */
+        .response-section {
+            border-top: 1px solid #e5e7eb;
+        }
+        .response-header {
+            padding: 16px 28px;
+            background: #f9fafb;
+            font-weight: 600;
+            font-size: 14px;
+            color: #374151;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .response-header:hover { background: #f3f4f6; }
+        .response-body {
+            padding: 0;
+            background: #1e293b;
+            max-height: 400px;
+            overflow: auto;
+        }
+        .response-body pre {
+            margin: 0;
+            padding: 20px 28px;
+            font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #e2e8f0;
+        }
+        
+        /* Utility */
+        .truncate { 
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">';
+
+    // Header
+    echo '<div class="header">
+            <div class="header-icon">' . ($isSuccess ? '✓' : '✕') . '</div>
+            <div>
+                <h1>' . ($isSuccess ? 'Invoice Processed Successfully' : 'Invoice Processing Failed') . '</h1>
+                <p>ZATCA E-Invoice Validation Result</p>
+            </div>
+          </div>';
+
+    echo '<div class="card">';
+
+    // Status Banner
+    $statusClass = match($status) {
+        'PASS' => 'status-pass',
+        'WARNING' => 'status-warning',
+        default => 'status-error'
+    };
+    echo '<div class="status-banner">
+            <span class="status-badge ' . $statusClass . '">● ' . esc($status) . '</span>';
+    if ($reportingStatus) {
+        echo '<span class="status-badge" style="background:#f3f4f6;color:#6b7280;">Reporting: ' . esc($reportingStatus) . '</span>';
+    }
+    if ($clearanceStatus) {
+        echo '<span class="status-badge" style="background:#f3f4f6;color:#6b7280;">Clearance: ' . esc($clearanceStatus) . '</span>';
+    }
+    echo '</div>';
+
+    // Info Grid
+    echo '<div class="info-grid">
+            <div class="info-item">
+                <div class="info-label">Invoice UUID</div>
+                <div class="info-value highlight">' . esc($uuid) . '</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Clearance Required</div>
+                <div class="info-value"><span style="color:' . ($isClearance ? '#ca8a04' : '#16a34a') . ';font-weight:600;">' . ($isClearance ? 'Yes' : 'No') . '</span></div>
+            </div>
+            <div class="info-item" style="grid-column: 1 / -1;">
+                <div class="info-label">Invoice Hash</div>
+                <div class="info-value highlight">' . esc($invoiceHash) . '</div>
+            </div>
+            <div class="info-item" style="grid-column: 1 / -1;">
+                <div class="info-label">QR Code Data</div>
+                <div class="info-value highlight" style="max-height:80px;overflow:auto;">' . esc($qrRaw) . '</div>
+            </div>
+          </div>';
+
+    // Validation Messages
+    if (!empty($infoMessages) || !empty($warningMessages) || !empty($errorMessages)) {
+        echo '<div class="messages-section">';
+        echo '<div class="messages-title">Validation Messages</div>';
+        
+        foreach ($errorMessages as $msg) {
+            echo '<div class="message-item message-error">
+                    <span>❌</span>
+                    <div><span class="message-code">' . esc($msg['code'] ?? '') . '</span> ' . esc($msg['message'] ?? '') . '</div>
+                  </div>';
+        }
+        foreach ($warningMessages as $msg) {
+            echo '<div class="message-item message-warning">
+                    <span>⚠️</span>
+                    <div><span class="message-code">' . esc($msg['code'] ?? '') . '</span> ' . esc($msg['message'] ?? '') . '</div>
+                  </div>';
+        }
+        foreach ($infoMessages as $msg) {
+            echo '<div class="message-item message-info">
+                    <span>ℹ️</span>
+                    <div><span class="message-code">' . esc($msg['code'] ?? '') . '</span> ' . esc($msg['message'] ?? '') . '</div>
+                  </div>';
+        }
+        echo '</div>';
     }
 
-    echo '<style>
-  body{font-family:Arial,Helvetica,sans-serif;background:#0e1430;color:#eef3ff;margin:16px}
-  .card{max-width:900px;margin:auto;background:#121a33;border:1px solid #1f2a4d;border-radius:12px;overflow:hidden}
-  .head{padding:14px 16px;background:#0b1026;border-bottom:1px solid #1f2a4d;font-weight:700}
-  .tbl{width:100%;border-collapse:collapse}
-  .tbl th,.tbl td{padding:10px 12px;border-top:1px solid #1f2a4d;font-size:14px;vertical-align:top}
-  .tbl th{width:220px;color:#cfe0ff;text-align:left;background:#0f1738}
-  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #1f2a4d;background:#1b2547;color:#cfe0ff;font-family:monospace}
-  .ok{color:#17c964;font-weight:700}
-  .warn{color:#f5a524;font-weight:700}
-  .btn{display:inline-block;margin:12px 0 0 16px;padding:8px 12px;border:1px solid #1f2a4d;border-radius:8px;background:#0b1430;color:#fff;text-decoration:none}
-  pre{margin:0;padding:12px 16px;background:#0a0f23;border-top:1px solid #1f2a4d;color:#d9e3ff;overflow:auto}
-</style>';
+    // Actions
+    echo '<div class="actions">
+            <a href="' . esc($xmlSavedPath) . '" download class="btn btn-primary">
+                <span>📄</span> Download Signed XML
+            </a>
+            <button onclick="document.getElementById(\'response-body\').style.display = document.getElementById(\'response-body\').style.display === \'none\' ? \'block\' : \'none\';" class="btn btn-secondary">
+                <span>{ }</span> Toggle Raw Response
+            </button>
+          </div>';
 
-echo '<div class="card">';
-echo '  <div class="head">'.($status == 'PASS' || $status == 'WARNING' ? 'Invoice processed successfully' : 'Invoice processing failed').'</div>';
-echo '  <table class="tbl">';
-echo '    <tr><th width="30%">Status</th><td><span class="'.($status == 'PASS' ? 'ok' : 'warn').'">'.($status == 'PASS'  ? 'Success' : 'Error').'</span></td></tr>';
-echo '    <tr><th width="30%">Clearance Required</th><td><span class="'.($isClearance?'warn':'ok').'">'.($isClearance?'Yes':'No').'</span></td></tr>';
-echo '    <tr><th width="30%">UUID</th><td><span class="pill">'.esc($uuid).'</span></td></tr>';
-echo '    <tr><th width="30%">Invoice Hash</th><td><span class="pill">'.esc($invoiceHash).'</span></td></tr>';
-echo '    <tr><th width="30%">QR (raw)</th><td><span class="pill">'.esc(trunc($qrRaw, 140)).'</span></td></tr>';
-echo '    <tr><th width="30%">Signed XML</th><td><a class="btn" href="'.esc($xmlSavedPath).'" download>⬇️ Download signed-invoice.xml</a></td></tr>';
-echo '  </table>';
+    // Raw Response
+    $responsePretty = json_encode($result['response'] ?? new stdClass(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    echo '<div class="response-section">
+            <div class="response-body" id="response-body" style="display:none;">
+                <pre>' . esc($responsePretty) . '</pre>
+            </div>
+          </div>';
 
-echo '  <div class="head" style="border-top:1px solid #1f2a4d;">ZATCA API Response</div>';
-echo '  <pre>'.esc($responsePretty).'</pre>';
-echo '</div>';
+    echo '</div>'; // card
+    echo '</div>'; // container
+    echo '</body></html>';
 
 } catch (ZatcaException $e) {
-    echo "ZATCA Error: " . $e->getMessage() . "\n";
-    echo "Context: " . json_encode($e->getContext()) . "\n";
+    echo '<!DOCTYPE html><html><head><style>body{font-family:sans-serif;padding:40px;background:#fef2f2;}.error{background:#fff;padding:24px;border-radius:12px;border-left:4px solid #ef4444;max-width:600px;margin:auto;}</style></head><body>';
+    echo '<div class="error"><h2 style="color:#dc2626;margin-bottom:12px;">ZATCA Error</h2>';
+    echo '<p style="margin-bottom:8px;">' . esc($e->getMessage()) . '</p>';
+    echo '<pre style="background:#f3f4f6;padding:12px;border-radius:8px;font-size:12px;overflow:auto;">' . esc(json_encode($e->getContext(), JSON_PRETTY_PRINT)) . '</pre>';
+    echo '</div></body></html>';
 } catch (Exception $e) {
-    echo "General Error: " . $e->getMessage() . "\n";
-} 
+    echo '<!DOCTYPE html><html><head><style>body{font-family:sans-serif;padding:40px;background:#fef2f2;}.error{background:#fff;padding:24px;border-radius:12px;border-left:4px solid #ef4444;max-width:600px;margin:auto;}</style></head><body>';
+    echo '<div class="error"><h2 style="color:#dc2626;margin-bottom:12px;">General Error</h2>';
+    echo '<p>' . esc($e->getMessage()) . '</p>';
+    echo '</div></body></html>';
+}
 
-
-
-function esc($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
-function trunc($v,$len=120){ $v=(string)$v; return mb_strlen($v)>$len ? mb_substr($v,0,$len).'…' : $v; }
+function esc($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }

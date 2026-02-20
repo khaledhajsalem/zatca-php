@@ -36,8 +36,8 @@ try {
     // Initialize ZATCA Manager
     $zatcaManager = new ZatcaManager([
         'environment' => 'sandbox',
-        'certificate_path' => '/path/to/your/certificate.pem',
-        'private_key_path' => '/path/to/your/private.pem',
+        'certificate_path' =>  __DIR__ . '/../storage/certificate.pem',
+        'private_key_path' => __DIR__ . '/../storage/private.pem',
         'secret' => 'your-secret-key'
     ]);
 

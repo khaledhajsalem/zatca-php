@@ -37,6 +37,7 @@ class InvoiceSignatureBuilder
 
         // Create the signed properties XML.
         $signedPropertiesXml = $this->createSignedPropertiesXml($signingTime);
+		$signedPropertiesXml = str_replace(["\r\n", "\r"], "\n", $signedPropertiesXml);
 
         // Create the UBLExtension element.
         $extensionXml = InvoiceExtension::newInstance("ext:UBLExtension");

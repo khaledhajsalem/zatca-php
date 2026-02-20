@@ -134,7 +134,12 @@ class Certificate
      */
     public function getCertHash(): string
     {
-        return base64_encode(hash('sha256', $this->rawCertificate));
+        $certContent = $this->rawCertificate;
+        $certContent = preg_replace('/-----BEGIN CERTIFICATE-----/', '', $certContent);
+        $certContent = preg_replace('/-----END CERTIFICATE-----/', '', $certContent);
+        $certContent = preg_replace('/\s+/', '', $certContent);
+        
+        return base64_encode(hash('sha256', $certContent));
     }
 
     /**

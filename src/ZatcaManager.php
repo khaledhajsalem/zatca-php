@@ -104,53 +104,6 @@ class ZatcaManager
     }
 
     /**
-     * Request compliance certificate.
-     *
-     * @param string $csr
-     * @param string $otp
-     * @return array
-     * @throws ZatcaException
-     */
-    public function requestComplianceCertificate(string $csr, string $otp): array
-    {
-        try {
-            $result = $this->apiService->requestComplianceCertificate($csr, $otp);
-            return [
-                'certificate' => $result->getCertificate(),
-                'secret' => $result->getSecret(),
-                'request_id' => $result->getRequestId()
-            ];
-        } catch (\Exception $e) {
-            throw new ZatcaException('Failed to request compliance certificate: ' . $e->getMessage(), [], 0, $e);
-        }
-    }
-
-    /**
-     * Request production certificate.
-     *
-     * @param string $complianceRequestId
-     * @return array
-     * @throws ZatcaException
-     */
-    public function requestProductionCertificate(string $complianceRequestId): array
-    {
-        try {
-            $result = $this->apiService->requestProductionCertificate(
-                $this->certificate->getRawCertificate(),
-                $this->config['secret'],
-                $complianceRequestId
-            );
-            return [
-                'certificate' => $result->getCertificate(),
-                'secret' => $result->getSecret(),
-                'request_id' => $result->getRequestId()
-            ];
-        } catch (\Exception $e) {
-            throw new ZatcaException('Failed to request production certificate: ' . $e->getMessage(), [], 0, $e);
-        }
-    }
-
-    /**
      * Validate invoice compliance.
      *
      * @param string $signedXml
@@ -173,8 +126,6 @@ class ZatcaManager
             throw new ZatcaException('Failed to validate invoice compliance: ' . $e->getMessage(), [], 0, $e);
         }
     }
-
-
 
     /**
      * Get the API service instance.

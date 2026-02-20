@@ -1,301 +1,408 @@
-# ZATCA PHP Package API Documentation
+# ZATCA PHP Package — API Reference
+
+> This document is a detailed API reference for every public class and method. For a getting-started guide, see [README.md](../README.md).
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [Core Classes](#core-classes)
-5. [Data Classes](#data-classes)
-6. [Support Classes](#support-classes)
-7. [Exceptions](#exceptions)
-8. [Configuration](#configuration)
-9. [Examples](#examples)
-10. [Error Handling](#error-handling)
+- [ZatcaManager](#zatcamanager)
+- [ZatcaInvoice](#zatcainvoice)
+- [ZatcaAPIService](#zatcaapiservice)
+- [Data Classes](#data-classes)
+  - [InvoiceData](#invoicedata)
+  - [SellerData](#sellerdata)
+  - [BuyerData](#buyerdata)
+  - [InvoiceLineData](#invoicelinedata)
+- [Support Classes](#support-classes)
+  - [CertificateBuilder](#certificatebuilder)
+  - [Certificate](#certificate)
+  - [InvoiceSigner](#invoicesigner)
+- [Exceptions](#exceptions)
+- [ZATCA API Environments](#zatca-api-environments)
 
-## Overview
+---
 
-The ZATCA PHP Package provides a comprehensive solution for creating, signing, and submitting invoices to the ZATCA (Saudi Arabia e-invoicing) platform. The package is designed to work with any PHP project without database dependencies.
+## ZatcaManager
 
-## Installation
+`KhaledHajSalem\Zatca\ZatcaManager`
 
-```bash
-composer require khaledhajsalem/zatca-php
-```
+The main class most developers will use. It orchestrates the full workflow: XML generation → signing → API submission.
 
-## Quick Start
-
-```php
-use KhaledHajSalem\Zatca\ZatcaManager;
-use KhaledHajSalem\Zatca\Data\InvoiceData;
-
-// Initialize manager
-$zatcaManager = new ZatcaManager([
-    'environment' => 'sandbox',
-    'certificate_path' => '/path/to/certificate.pem',
-    'private_key_path' => '/path/to/private.pem',
-    'secret' => 'your-secret-key'
-]);
-
-// Create and process invoice
-$invoiceData = new InvoiceData();
-// ... set invoice data ...
-
-$result = $zatcaManager->processInvoice($invoiceData);
-```
-
-## Core Classes
-
-### ZatcaManager
-
-The main orchestrator class that handles the complete ZATCA workflow.
-
-#### Constructor
+### Constructor
 
 ```php
 public function __construct(array $config = [])
 ```
 
-**Parameters:**
-- `$config` (array): Configuration array with the following keys:
-  - `environment` (string): API environment ('sandbox', 'simulation', 'production')
-  - `certificate_path` (string): Path to certificate file
-  - `private_key_path` (string): Path to private key file
-  - `secret` (string): API secret key
-  - `timeout` (int): HTTP timeout in seconds (default: 30)
-  - `verify_ssl` (bool): Whether to verify SSL certificates (default: true)
-  - `allow_warnings` (bool): Whether to allow warning responses (default: true)
+| Config Key | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `environment` | `string` | Yes | `'sandbox'` | `'sandbox'`, `'simulation'`, or `'production'` |
+| `certificate_path` | `string` | Yes | — | Absolute path to certificate PEM file |
+| `private_key_path` | `string` | Yes | — | Absolute path to private key PEM file |
+| `secret` | `string` | Yes | — | API secret key from ZATCA |
+| `timeout` | `int` | No | `30` | HTTP timeout in seconds |
+| `verify_ssl` | `bool` | No | `true` | Verify SSL certificates |
+| `allow_warnings` | `bool` | No | `true` | Accept responses with warning status |
 
-#### Methods
+**Throws:** `ZatcaException` if required config is missing or files don't exist.
 
-##### processInvoice()
+### processInvoice()
 
 ```php
 public function processInvoice(InvoiceData $invoiceData, bool $isRetry = false): array
 ```
 
-Processes a complete invoice workflow including XML generation, signing, and submission.
-
-**Parameters:**
-- `$invoiceData` (InvoiceData): Invoice data object
-- `$isRetry` (bool): Whether this is a retry attempt
+Generates XML, signs it, and submits to ZATCA. Automatically determines whether to use clearance (standard) or reporting (simplified).
 
 **Returns:**
-- `array`: Result containing QR code, hash, XML, UUID, and API response
 
-##### requestComplianceCertificate()
+| Key | Type | Description |
+|-----|------|-------------|
+| `uuid` | `string` | Auto-generated invoice UUID |
+| `invoice_hash` | `string` | Base64-encoded SHA-256 hash. **Save this as PIH for the next invoice.** |
+| `qr_code` | `string` | Base64-encoded TLV QR code |
+| `xml` | `string` | Signed XML. For cleared invoices, this is the ZATCA-returned XML. |
+| `response` | `array` | Raw ZATCA API response (see below) |
+| `is_clearance_required` | `bool` | `true` for standard, `false` for simplified |
+
+**ZATCA response structure:**
 
 ```php
-public function requestComplianceCertificate(string $csr, string $otp): array
+$result['response'] = [
+    'validationResults' => [
+        'status' => 'PASS',         // 'PASS', 'WARNING', or 'ERROR'
+        'infoMessages' => [...],
+        'warningMessages' => [...],
+        'errorMessages' => [...],
+    ],
+    'reportingStatus' => 'REPORTED',  // For simplified invoices
+    'clearanceStatus' => 'CLEARED',   // For standard invoices
+    'clearedInvoice' => '...',        // Base64 cleared XML (standard only)
+];
 ```
 
-Requests a compliance certificate from ZATCA.
+**Throws:** `ZatcaException`
 
-**Parameters:**
-- `$csr` (string): Certificate signing request content
-- `$otp` (string): One-time password from ZATCA
+> **Note:** Certificate requests (`requestComplianceCertificate`, `requestProductionCertificate`) are handled by [`ZatcaAPIService`](#zatcaapiservice) directly, since they are needed *before* a certificate exists to construct `ZatcaManager`.
 
-**Returns:**
-- `array`: Certificate data including certificate, secret, and request ID
-
-##### requestProductionCertificate()
-
-```php
-public function requestProductionCertificate(string $complianceRequestId): array
-```
-
-Requests a production certificate using compliance credentials.
-
-**Parameters:**
-- `$complianceRequestId` (string): Compliance request ID
-
-**Returns:**
-- `array`: Production certificate data
-
-##### validateInvoiceCompliance()
+### validateInvoiceCompliance()
 
 ```php
 public function validateInvoiceCompliance(string $signedXml, string $invoiceHash, string $uuid): array
 ```
 
-Validates invoice compliance with ZATCA regulations.
+Validates a signed invoice against ZATCA compliance rules without submitting it.
 
-**Parameters:**
-- `$signedXml` (string): Signed invoice XML
-- `$invoiceHash` (string): Invoice hash
-- `$uuid` (string): Invoice UUID
+**Returns:** ZATCA validation response array.
 
-**Returns:**
-- `array`: Validation response from ZATCA
-
-
-
-### ZatcaInvoice
-
-Generates UBL 2.1 compliant invoice XML.
-
-#### Methods
-
-##### generateXml()
+### getApiService()
 
 ```php
-public function generateXml(InvoiceData $invoiceData): string
+public function getApiService(): ZatcaAPIService
 ```
 
-Generates UBL 2.1 compliant invoice XML.
+Returns the underlying API service instance for advanced usage.
 
-**Parameters:**
-- `$invoiceData` (InvoiceData): Invoice data object
+### getCertificate()
 
-**Returns:**
-- `string`: Generated XML content
+```php
+public function getCertificate(): Certificate
+```
+
+Returns the loaded Certificate instance.
+
+---
+
+## ZatcaInvoice
+
+`KhaledHajSalem\Zatca\ZatcaInvoice`
+
+Generates UBL 2.1 compliant invoice XML from an `InvoiceData` object.
+
+### generateXml()
+
+```php
+public function generateXml(InvoiceData $invoiceData, ?string $uuid = null): string
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$invoiceData` | `InvoiceData` | Fully populated invoice data |
+| `$uuid` | `string\|null` | Invoice UUID. Auto-generated if `null`. |
+
+**Returns:** UBL 2.1 XML string.
+
+> **Note:** You typically don't call this directly — `ZatcaManager::processInvoice()` calls it for you.
+
+---
+
+## ZatcaAPIService
+
+`KhaledHajSalem\Zatca\Services\ZatcaAPIService`
+
+Low-level ZATCA API client. Use this directly only if you need fine-grained control over API calls.
+
+### Constructor
+
+```php
+public function __construct(string $environment = 'sandbox')
+```
+
+**Throws:** `InvalidArgumentException` if environment is not `sandbox`, `simulation`, or `production`.
+
+### requestComplianceCertificate()
+
+```php
+public function requestComplianceCertificate(string $csr, string $otp): ComplianceCertificateResult
+```
+
+**Returns:** `ComplianceCertificateResult` with methods: `getCertificate()`, `getSecret()`, `getRequestId()`.
+
+### requestProductionCertificate()
+
+```php
+public function requestProductionCertificate(string $certificate, string $secret, string $complianceRequestId): ProductionCertificateResult
+```
+
+**Returns:** `ProductionCertificateResult` with methods: `getCertificate()`, `getSecret()`, `getRequestId()`.
+
+### validateInvoiceCompliance()
+
+```php
+public function validateInvoiceCompliance(string $certificate, string $secret, string $signedInvoice, string $invoiceHash, string $uuid): array
+```
+
+### clearInvoice()
+
+```php
+public function clearInvoice(string $certificate, string $secret, string $signedInvoice, string $invoiceHash, string $uuid): array
+```
+
+Submits a standard invoice for clearance.
+
+### reportInvoice()
+
+```php
+public function reportInvoice(string $certificate, string $secret, string $signedInvoice, string $invoiceHash, string $uuid): array
+```
+
+Submits a simplified invoice for reporting.
+
+### setWarningHandling()
+
+```php
+public function setWarningHandling(bool $allow): void
+```
+
+When `true` (default), responses with warning status are accepted. When `false`, warnings throw exceptions.
+
+### setDebugMode()
+
+```php
+public function setDebugMode(bool $debug): void
+```
+
+When `true`, prints detailed request/response information to stdout. Useful for debugging API issues.
+
+---
 
 ## Data Classes
 
 ### InvoiceData
 
-Data class for invoice information.
+`KhaledHajSalem\Zatca\Data\InvoiceData`
 
-#### Properties
+All setters return `$this` for method chaining.
 
-- `invoiceNumber` (string): Invoice number
-- `issueDate` (string): Issue date (YYYY-MM-DD)
-- `issueTime` (string): Issue time (HH:MM:SS)
-- `dueDate` (string): Due date (YYYY-MM-DD)
-- `currencyCode` (string): Currency code (default: 'SAR')
-- `invoiceTypeCode` (string): Invoice type code (default: '388')
-- `invoiceTypeName` (string): Invoice type name (default: '0100000' for Standard Tax Invoice)
-- `documentCurrencyCode` (string): Document currency code
-- `taxCurrencyCode` (string): Tax currency code
-- `lineCountNumeric` (int): Number of invoice lines
-- `taxTotalAmount` (float): Total tax amount
-- `taxExclusiveAmount` (float): Tax exclusive amount
-- `taxInclusiveAmount` (float): Tax inclusive amount
-- `allowanceTotalAmount` (float): Total allowance amount
-- `chargeTotalAmount` (float): Total charge amount
-- `payableAmount` (float): Payable amount
-- `seller` (SellerData): Seller information
-- `buyer` (BuyerData): Buyer information
-- `lines` (array): Invoice line items
+#### Invoice Type Methods
 
-#### Methods
+| Method | Sets | Value |
+|--------|------|-------|
+| `standard()` | `invoiceTypeName` | `'0100000'` (B2B, clearance required) |
+| `simplified()` | `invoiceTypeName` | `'0200000'` (B2C, reporting only) |
+| `taxInvoice()` | `invoiceTypeCode` | `'388'` |
+| `creditNote()` | `invoiceTypeCode` | `'381'` |
+| `debitNote()` | `invoiceTypeCode` | `'383'` |
+| `prepaymentInvoice()` | `invoiceTypeCode` | `'386'` |
 
-##### Setters
+#### Invoice Type Checkers
 
-All properties have corresponding setter methods that return `$this` for method chaining:
+| Method | Returns |
+|--------|---------|
+| `isStandard(): bool` | `true` if type name is `'0100000'` |
+| `isSimplified(): bool` | `true` if type name is `'0200000'` |
+| `isCreditNote(): bool` | `true` if type code is `'381'` |
+| `isDebitNote(): bool` | `true` if type code is `'383'` |
+| `isCreditOrDebitNote(): bool` | `true` if credit or debit |
 
-```php
-$invoiceData->setInvoiceNumber('INV-001')
-    ->setIssueDate('2024-01-15')
-    ->setIssueTime('10:30:00')
-    ->setCurrencyCode('SAR');
-```
+#### Setters
 
-##### addLine()
+| Method | Type | Default | Description |
+|--------|------|---------|-------------|
+| `setInvoiceNumber($v)` | `string` | `''` | Invoice number |
+| `setIssueDate($v)` | `string` | `''` | Format: `Y-m-d` |
+| `setIssueTime($v)` | `string` | `''` | Format: `H:i:s` |
+| `setDueDate($v)` | `string` | `''` | Format: `Y-m-d` |
+| `setCurrencyCode($v)` | `string` | `'SAR'` | ISO 4217 |
+| `setDocumentCurrencyCode($v)` | `string` | `'SAR'` | Usually same as currency |
+| `setTaxCurrencyCode($v)` | `string` | `'SAR'` | Usually same as currency |
+| `setInvoiceCounter($v)` | `string` | `'1'` | ICV: sequential counter |
+| `setPreviousInvoiceHash($v)` | `string` | `'MA=='` | PIH: `'MA=='` for first invoice |
+| `setInvoiceTypeName($v)` | `string` | `'0100000'` | Use `standard()` / `simplified()` instead |
+| `setInvoiceTypeCode($v)` | `string` | `'388'` | Use `taxInvoice()` etc. instead |
+| `setTransactionCode($v)` | `string` | `'0100000'` | KSA-2 transaction code |
+| `setSeller($v)` | `SellerData` | `null` | Seller information |
+| `setBuyer($v)` | `BuyerData` | `null` | Buyer information |
 
-```php
-public function addLine(InvoiceLineData $line): self
-```
+#### Totals (auto-calculated by `calculateTotals()`)
 
-Adds an invoice line item.
+| Method | Type | Default |
+|--------|------|---------|
+| `setTaxTotalAmount($v)` | `float` | `0.0` |
+| `setTaxExclusiveAmount($v)` | `float` | `0.0` |
+| `setTaxInclusiveAmount($v)` | `float` | `0.0` |
+| `setAllowanceTotalAmount($v)` | `float` | `0.0` |
+| `setChargeTotalAmount($v)` | `float` | `0.0` |
+| `setPayableAmount($v)` | `float` | `0.0` |
+| `setLineCountNumeric($v)` | `int` | `0` |
 
-##### calculateTotals()
+#### Collection Methods
+
+| Method | Description |
+|--------|-------------|
+| `addLine(InvoiceLineData $line)` | Add a line item. Auto-updates `lineCountNumeric`. |
+| `addBillingReference(array $ref)` | Add billing reference. Keys: `id`, `uuid`. Required for credit/debit notes. |
+| `addPaymentMeans(array $pm)` | Add payment means. Keys: `code`, `instruction_note`, `id` (optional), `due_date` (optional). |
+| `addDocumentReference(array $ref)` | Add document reference. |
+| `addAllowance(array $allowance)` | Add document-level allowance. Key: `amount`. |
+| `addCharge(array $charge)` | Add document-level charge. Key: `amount`. |
+| `setDeliveryInfo(array $info)` | Set delivery information. |
+
+#### calculateTotals()
 
 ```php
 public function calculateTotals(): self
 ```
 
-Calculates invoice totals from line items.
+Sums all line items to compute invoice-level totals:
+- `taxExclusiveAmount` = sum of line `taxExclusiveAmount`
+- `taxTotalAmount` = sum of line `taxAmount`
+- `allowanceTotalAmount` = sum of line allowances + document allowances
+- `chargeTotalAmount` = sum of line charges + document charges
+- `taxInclusiveAmount` = taxExclusive + tax + charges - allowances
+- `payableAmount` = taxInclusiveAmount
+
+**Call this after adding all lines, allowances, and charges.**
+
+---
 
 ### SellerData
 
-Data class for seller information.
+`KhaledHajSalem\Zatca\Data\SellerData`
 
-#### Properties
+| Method | Type | Default | Description |
+|--------|------|---------|-------------|
+| `setRegistrationName($v)` | `string` | `''` | Company legal name |
+| `setVatNumber($v)` | `string` | `''` | 15-digit VAT number |
+| `setPartyIdentification($v)` | `string` | `''` | ID value (e.g., CRN number) |
+| `setPartyIdentificationId($v)` | `string` | `'CRN'` | Scheme: `CRN`, `VAT`, `TIN`, `NAT`, `IQA`, `GCC`, `PAS`, `MOM`, `MLS`, `SAG`, `700`, `OTH` |
+| `setAddress($v)` | `string` | `''` | Full address string |
+| `setStreetName($v)` | `string` | `''` | Street name |
+| `setBuildingNumber($v)` | `string` | `''` | Building number |
+| `setCityName($v)` | `string` | `''` | City name |
+| `setPostalZone($v)` | `string` | `''` | Postal/ZIP code |
+| `setCountryCode($v)` | `string` | `'SA'` | 2-letter country code |
+| `setPlotIdentification($v)` | `string` | `''` | Plot identification |
+| `setCitySubdivisionName($v)` | `string` | `''` | District/subdivision name |
 
-- `registrationName` (string): Company registration name
-- `vatNumber` (string): VAT registration number
-- `partyIdentification` (string):  party Identification
-- `partyIdentificationId` (string): party Identification ID
-- `address` (string): Full address
-- `countryCode` (string): Country code (default: 'SA')
-- `cityName` (string): City name
-- `postalZone` (string): Postal code
-- `streetName` (string): Street name
-- `buildingNumber` (string): Building number
-- `plotIdentification` (string): Plot identification
-- `citySubdivisionName` (string): City subdivision name
+All setters have corresponding getters (e.g., `getRegistrationName(): string`).
+
+---
 
 ### BuyerData
 
-Data class for buyer information. Same properties as SellerData.
+`KhaledHajSalem\Zatca\Data\BuyerData`
+
+Same methods as [SellerData](#sellerdata). Default `partyIdentificationId` is `'TIN'` instead of `'CRN'`.
+
+For simplified invoices, `vatNumber` is optional.
+
+---
 
 ### InvoiceLineData
 
-Data class for invoice line items.
+`KhaledHajSalem\Zatca\Data\InvoiceLineData`
 
-#### Properties
+| Method | Type | Default | Description |
+|--------|------|---------|-------------|
+| `setId($v)` | `int` | `0` | Line number (1, 2, 3...) |
+| `setItemName($v)` | `string` | `''` | Item name |
+| `setDescription($v)` | `string` | `''` | Item description |
+| `setQuantity($v)` | `float` | `0.0` | Quantity |
+| `setUnitPrice($v)` | `float` | `0.0` | Unit price (tax-exclusive) |
+| `setTaxPercent($v)` | `float` | `0.0` | VAT percentage (e.g., `15.0`) |
+| `setUnitCode($v)` | `string` | `'EA'` | UN/ECE unit code |
+| `setItemCode($v)` | `string` | `''` | Item code |
+| `setAllowanceAmount($v)` | `float` | `0.0` | Line-level discount |
+| `setChargeAmount($v)` | `float` | `0.0` | Line-level surcharge |
+| `addTaxCategory(array $cat)` | `array` | `[]` | Additional tax categories |
 
-- `id` (int): Line item ID
-- `itemName` (string): Item name
-- `description` (string): Item description
-- `quantity` (float): Quantity
-- `unitPrice` (float): Unit price
-- `lineExtensionAmount` (float): Line extension amount
-- `taxAmount` (float): Tax amount
-- `taxPercent` (float): Tax percentage
-- `taxExclusiveAmount` (float): Tax exclusive amount
-- `taxInclusiveAmount` (float): Tax inclusive amount
-- `allowanceAmount` (float): Allowance amount
-- `chargeAmount` (float): Charge amount
-- `unitCode` (string): Unit code (default: 'EA')
-- `itemCode` (string): Item code
-
-#### Methods
-
-##### calculateTotals()
+#### calculateTotals()
 
 ```php
 public function calculateTotals(): self
 ```
 
-Calculates line item totals.
+Computes from `quantity`, `unitPrice`, `taxPercent`, `allowanceAmount`, `chargeAmount`:
+
+```
+lineExtensionAmount = quantity × unitPrice
+taxExclusiveAmount  = lineExtensionAmount - allowanceAmount + chargeAmount
+taxAmount           = taxExclusiveAmount × (taxPercent / 100)
+taxInclusiveAmount  = taxExclusiveAmount + taxAmount
+```
+
+**Set `allowanceAmount` and `chargeAmount` before calling `calculateTotals()`.**
+
+You can also set all amounts manually instead of calling `calculateTotals()`:
+
+| Method | Type | Description |
+|--------|------|-------------|
+| `setLineExtensionAmount($v)` | `float` | qty × price |
+| `setTaxAmount($v)` | `float` | Tax amount |
+| `setTaxExclusiveAmount($v)` | `float` | Before tax |
+| `setTaxInclusiveAmount($v)` | `float` | After tax |
+
+---
 
 ## Support Classes
 
 ### CertificateBuilder
 
-Generates CSR and private key for ZATCA certificates.
+`KhaledHajSalem\Zatca\Support\CertificateBuilder`
 
-#### Methods
+Generates a CSR (Certificate Signing Request) and private key for ZATCA onboarding.
 
-##### setOrganizationIdentifier()
+| Method | Type | Description |
+|--------|------|-------------|
+| `setOrganizationIdentifier($v)` | `string` | 15 digits, starts and ends with `3` |
+| `setSerialNumber($solution, $model, $serial)` | `string, string, string` | Device serial number |
+| `setCommonName($v)` | `string` | Company name |
+| `setCountryName($v)` | `string` | 2-letter code (e.g., `SA`) |
+| `setOrganizationName($v)` | `string` | Organization name |
+| `setOrganizationalUnitName($v)` | `string` | Department name |
+| `setAddress($v)` | `string` | Full address |
+| `setInvoiceType($v)` | `int` | 4 digits: `[Standard][Simplified][0][0]` — e.g., `1100` |
+| `setProduction($v)` | `bool` | `false` for sandbox, `true` for production |
+| `setBusinessCategory($v)` | `string` | e.g., `'Legal Entity'`, `'Technology'` |
+| `generateAndSave($csrPath, $keyPath)` | `string, string` | Saves CSR and private key to files |
 
-```php
-public function setOrganizationIdentifier(string $identifier): self
-```
-
-Sets the organization identifier (15 digits starting and ending with 3).
-
-##### setSerialNumber()
-
-```php
-public function setSerialNumber(string $solutionName, string $model, string $serialNumber): self
-```
-
-Sets the serial number using solution name, model, and serial.
-
-##### generateAndSave()
-
-```php
-public function generateAndSave(string $csrPath = 'certificate.csr', string $privateKeyPath = 'private.pem'): void
-```
-
-Generates and saves CSR and private key to files.
+---
 
 ### Certificate
 
-Handles certificate operations and authentication.
+`KhaledHajSalem\Zatca\Support\Certificate`
+
+Loads and manages a signing certificate.
 
 #### Constructor
 
@@ -303,183 +410,84 @@ Handles certificate operations and authentication.
 public function __construct(string $rawCert, string $privateKeyStr, string $secretKey)
 ```
 
-**Parameters:**
-- `$rawCert` (string): Raw certificate content
-- `$privateKeyStr` (string): Private key string
-- `$secretKey` (string): Secret key for authentication
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$rawCert` | `string` | Raw PEM certificate content (`file_get_contents('cert.pem')`) |
+| `$privateKeyStr` | `string` | Raw PEM private key content |
+| `$secretKey` | `string` | API secret key from ZATCA |
 
 #### Methods
 
-##### getAuthHeader()
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getRawCertificate()` | `string` | Raw PEM certificate |
+| `getPrivateKey()` | `string` | Raw PEM private key |
+| `getCertHash()` | `string` | Base64-encoded SHA-256 hash of certificate content |
+| `getRawPublicKey()` | `string` | Base64-encoded public key |
+| `getAuthHeader()` | `string` | `Basic ...` authorization header value |
 
-```php
-public function getAuthHeader(): string
-```
-
-Creates the authorization header for API requests.
-
-##### getCertHash()
-
-```php
-public function getCertHash(): string
-```
-
-Generates a hash of the certificate.
-
-##### getRawPublicKey()
-
-```php
-public function getRawPublicKey(): string
-```
-
-Gets the raw public key in base64 format.
+---
 
 ### InvoiceSigner
 
-Signs invoice XML and generates QR codes.
+`KhaledHajSalem\Zatca\Support\InvoiceSigner`
 
-#### Methods
+Signs invoice XML with XMLDsig/XAdES and generates QR codes.
 
-##### signInvoice()
+#### signInvoice()
 
 ```php
 public static function signInvoice(string $xmlInvoice, Certificate $certificate): self
 ```
 
-Signs the invoice XML and returns an InvoiceSigner object.
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$xmlInvoice` | `string` | UBL 2.1 invoice XML |
+| `$certificate` | `Certificate` | Loaded certificate instance |
 
-**Parameters:**
-- `$xmlInvoice` (string): Invoice XML as string
-- `$certificate` (Certificate): Certificate for signing
+**Returns:** `InvoiceSigner` instance.
 
-**Returns:**
-- `InvoiceSigner`: Signed invoice object
+#### Instance Methods
 
-##### getXML()
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getXML()` | `string` | Signed XML string |
+| `getQRCode()` | `string` | Base64-encoded TLV QR code |
+| `getHash()` | `string` | Base64-encoded SHA-256 invoice hash |
 
-```php
-public function getXML(): string
-```
-
-Gets the signed XML string.
-
-##### getQRCode()
-
-```php
-public function getQRCode(): string
-```
-
-Gets the QR code (base64 encoded).
-
-##### getHash()
-
-```php
-public function getHash(): string
-```
-
-Gets the invoice hash (base64 encoded).
+---
 
 ## Exceptions
 
-### ZatcaException
+All exceptions extend `ZatcaException` and provide `getContext(): array` for structured error details.
 
-Base exception class for ZATCA package.
-
-#### Methods
-
-##### getContext()
-
-```php
-public function getContext(): array
-```
-
-Gets additional context information about the error.
-
-### CertificateBuilderException
-
-Exception thrown when certificate building fails.
-
-### ZatcaApiException
-
-Exception thrown when ZATCA API calls fail.
-
-### ZatcaStorageException
-
-Exception thrown when storage operations fail.
-
-## Configuration
-
-### Environment Settings
+| Exception | Namespace | When thrown |
+|-----------|-----------|------------|
+| `ZatcaException` | `Exceptions\ZatcaException` | Base exception. Missing config, processing errors. |
+| `CertificateBuilderException` | `Exceptions\CertificateBuilderException` | CSR generation failures. |
+| `ZatcaApiException` | `Exceptions\ZatcaApiException` | ZATCA API errors (HTTP, validation, auth). |
+| `ZatcaStorageException` | `Exceptions\ZatcaStorageException` | File read/write failures. |
 
 ```php
-$config = [
-    'environment' => 'sandbox', // sandbox, simulation, production
-    'timeout' => 30,
-    'verify_ssl' => true,
-    'allow_warnings' => true
-];
-```
-
-### Certificate Configuration
-
-```php
-$certConfig = [
-    'certificate_path' => '/path/to/certificate.pem',
-    'private_key_path' => '/path/to/private.pem',
-    'secret' => 'your-secret-key',
-    'organization_identifier' => '300000000000003'
-];
-```
-
-## Error Handling
-
-```php
-use KhaledHajSalem\Zatca\Exceptions\ZatcaException;
-use KhaledHajSalem\Zatca\Exceptions\CertificateBuilderException;
-use KhaledHajSalem\Zatca\Exceptions\ZatcaApiException;
-
 try {
     $result = $zatcaManager->processInvoice($invoiceData);
-} catch (CertificateBuilderException $e) {
-    echo "Certificate error: " . $e->getMessage();
-} catch (ZatcaApiException $e) {
-    echo "API error: " . $e->getMessage();
-    echo "Response: " . json_encode($e->getContext());
-} catch (ZatcaException $e) {
-    echo "General error: " . $e->getMessage();
+} catch (\KhaledHajSalem\Zatca\Exceptions\ZatcaApiException $e) {
+    $context = $e->getContext();
+    // $context['endpoint'], $context['status_code'], $context['response']
+} catch (\KhaledHajSalem\Zatca\Exceptions\ZatcaException $e) {
+    echo $e->getMessage();
+    echo json_encode($e->getContext());
 }
 ```
 
-## Invoice Types
+---
 
-The package supports all ZATCA invoice types with proper clearance handling:
+## ZATCA API Environments
 
-### Standard Tax Invoice (B2B/B2G)
-- **Name:** `"0100000"`
-- **Clearance:** Required before distribution
-- **Use Case:** Business-to-business or business-to-government transactions
+| Environment | Base URL | Use case |
+|-------------|----------|----------|
+| `sandbox` | `https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal` | Development & testing |
+| `simulation` | `https://gw-fatoora.zatca.gov.sa/e-invoicing/simulation` | Pre-production testing |
+| `production` | `https://gw-fatoora.zatca.gov.sa/e-invoicing/core` | Live invoices |
 
-### Simplified Tax Invoice (B2C)
-- **Name:** `"0200000"`
-- **Clearance:** Not required, report within 24 hours
-- **Use Case:** Business-to-consumer transactions
-
-### Debit Note
-- **Code:** `383`
-- **Use Case:** Additional charges or corrections
-
-### Credit Note
-- **Code:** `381`
-- **Use Case:** Returns, refunds, or corrections
-
-### Prepayment Invoice
-- **Code:** `386`
-- **Use Case:** Advance payments
-
-## Examples
-
-See the `examples/` directory for complete working examples:
-
-- `basic-usage.php`: Basic invoice processing
-- `certificate-generation.php`: Certificate generation workflow
-- `invoice-types.php`: Different invoice types and clearance requirements 
+API version: **V2**

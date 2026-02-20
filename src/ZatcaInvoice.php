@@ -515,7 +515,7 @@ class ZatcaInvoice
             $this->appendElement($dom, $invoiceLine, 'cbc:ID', (string)$line->getId());
             
             // InvoicedQuantity with unitCode
-            $invoicedQuantity = $dom->createElement('cbc:InvoicedQuantity', number_format($line->getQuantity(), 2));
+            $invoicedQuantity = $dom->createElement('cbc:InvoicedQuantity', number_format($line->getQuantity(), 2, '.', ''));
             $invoicedQuantity->setAttribute('unitCode', 'PCE');
             $invoiceLine->appendChild($invoicedQuantity);
             

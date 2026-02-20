@@ -327,7 +327,6 @@ class InvoiceExtension
 
         $issueDate = $this->find("cbc:IssueDate")->toText();
         $issueTime = $this->find("cbc:IssueTime")->toText();
-        $issueTime = stripos($issueTime, 'Z') === false ? $issueTime . 'Z' : $issueTime;
 
         $qrTags = [
             new Seller($this->find("cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:RegistrationName")->toText()),
