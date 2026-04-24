@@ -1,0 +1,11 @@
+/vendor/
+/node_modules/
+.env
+.phpunit.result.cache
+phpunit.xml
+phpstan.neon
+composer.lock
+*.swp
+*.swo
+.idea/
+.vscode/

@@ -1,0 +1,24 @@
+<?php
+
+namespace App\Providers;
+
+use KhaledHajSalem\ZatcaLaravel\ZatcaApplicationServiceProvider;
+
+class ZatcaServiceProvider extends ZatcaApplicationServiceProvider
+{
+    /**
+     * Register the ZATCA dashboard gate.
+     *
+     * This gate determines who can access the ZATCA dashboard
+     * in non-local environments. Customize this method to fit
+     * your authorization requirements.
+     */
+    protected function gate(): void
+    {
+        \Illuminate\Support\Facades\Gate::define('viewZatcaDashboard', function ($user) {
+            return in_array($user->email, [
+                // 'admin@example.com',
+            ]);
+        });
+    }
+}
