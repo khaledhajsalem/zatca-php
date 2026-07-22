@@ -8,9 +8,24 @@ use KhaledHajSalem\Zatca\Data\InvoiceData;
 use KhaledHajSalem\Zatca\Data\SellerData;
 use KhaledHajSalem\Zatca\Data\BuyerData;
 use KhaledHajSalem\Zatca\Data\InvoiceLineData;
+use DOMDocument;
+use DOMXPath;
 
 class ZatcaInvoiceTest extends TestCase
 {
+    /**
+     * Build a DOMXPath over the given XML with the cbc/cac namespaces registered.
+     */
+    private function xpath(string $xml): DOMXPath
+    {
+        $dom = new DOMDocument();
+        $dom->loadXML($xml);
+        $xpath = new DOMXPath($dom);
+        $xpath->registerNamespace('cbc', 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2');
+        $xpath->registerNamespace('cac', 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2');
+        return $xpath;
+    }
+
     public function testGenerateXml()
     {
         // Create invoice data
@@ -340,5 +355,178 @@ class ZatcaInvoiceTest extends TestCase
 
         // InstructionNote should NOT be present for prepayment invoice (386)
         $this->assertStringNotContainsString('إلغاء أو تعليق التوريدات', $xml);
+    }
+
+    /**
+     * Line-level discount (BG-27) must be expressed as a line AllowanceCharge,
+     * the line LineExtensionAmount must be NET, and document totals must not
+     * double-subtract the line allowance.
+     */
+    public function testLineLevelAllowance()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->setInvoiceNumber('INV-DISC-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setDocumentCurrencyCode('SAR');
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Test Product')
+            ->setQuantity(1)
+            ->setUnitPrice(40.00)
+            ->setAllowanceAmount(4.00)
+            ->setAllowanceReason('Loyalty discount')
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+        $xpath = $this->xpath($xml);
+
+        // Line LineExtensionAmount is NET (40 - 4).
+        $this->assertEquals('36.00', $xpath->evaluate('string(//cac:InvoiceLine/cbc:LineExtensionAmount)'));
+
+        // Line-level AllowanceCharge present with ChargeIndicator=false and Amount=4.00.
+        $this->assertEquals(1, $xpath->evaluate('count(//cac:InvoiceLine/cac:AllowanceCharge)'));
+        $this->assertEquals('false', $xpath->evaluate('string(//cac:InvoiceLine/cac:AllowanceCharge/cbc:ChargeIndicator)'));
+        $this->assertEquals('Loyalty discount', $xpath->evaluate('string(//cac:InvoiceLine/cac:AllowanceCharge/cbc:AllowanceChargeReason)'));
+        $this->assertEquals('4.00', $xpath->evaluate('string(//cac:InvoiceLine/cac:AllowanceCharge/cbc:Amount)'));
+
+        // The discount must no longer be duplicated inside cac:Price.
+        $this->assertEquals(0, $xpath->evaluate('count(//cac:InvoiceLine/cac:Price/cac:AllowanceCharge)'));
+        $this->assertEquals('40.00', $xpath->evaluate('string(//cac:InvoiceLine/cac:Price/cbc:PriceAmount)'));
+
+        // Line tax on the NET amount: 36 * 0.15 = 5.40.
+        $this->assertEquals('5.40', $xpath->evaluate('string(//cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount)'));
+
+        // Document totals.
+        $this->assertEquals('36.00', $xpath->evaluate('string(//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount)'));
+        $this->assertEquals('41.40', $xpath->evaluate('string(//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount)'));
+        $this->assertEquals('41.40', $xpath->evaluate('string(//cac:LegalMonetaryTotal/cbc:PayableAmount)'));
+    }
+
+    /**
+     * A line with no allowance must not emit a line-level AllowanceCharge, and
+     * LineExtensionAmount must equal the gross amount.
+     */
+    public function testLineWithoutAllowanceHasNoLineAllowanceCharge()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->setInvoiceNumber('INV-NODISC-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setDocumentCurrencyCode('SAR');
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Test Product')
+            ->setQuantity(2)
+            ->setUnitPrice(100.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+        $xpath = $this->xpath($xml);
+
+        // No line-level AllowanceCharge.
+        $this->assertEquals(0, $xpath->evaluate('count(//cac:InvoiceLine/cac:AllowanceCharge)'));
+
+        // LineExtensionAmount equals gross (2 * 100).
+        $this->assertEquals('200.00', $xpath->evaluate('string(//cac:InvoiceLine/cbc:LineExtensionAmount)'));
+
+        // Document totals unchanged from prior behaviour.
+        $this->assertEquals('200.00', $xpath->evaluate('string(//cac:LegalMonetaryTotal/cbc:TaxExclusiveAmount)'));
+        $this->assertEquals('230.00', $xpath->evaluate('string(//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount)'));
+        $this->assertEquals('230.00', $xpath->evaluate('string(//cac:LegalMonetaryTotal/cbc:PayableAmount)'));
+    }
+
+    /**
+     * Simplified (B2C) invoice with a walk-in buyer (no VAT/ID/address) must not
+     * emit an AccountingCustomerParty at all, and never an empty <cbc:ID>.
+     */
+    public function testSimplifiedBuyerOmitsCustomerParty()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->simplified()
+            ->setInvoiceNumber('INV-B2C-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setDocumentCurrencyCode('SAR');
+
+        $buyer = new BuyerData(); // no VAT, no identification, no address, no name
+        $invoiceData->setBuyer($buyer);
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Test Product')
+            ->setQuantity(1)
+            ->setUnitPrice(100.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+        $xpath = $this->xpath($xml);
+
+        // No customer party at all for an unidentified walk-in.
+        $this->assertEquals(0, $xpath->evaluate('count(//cac:AccountingCustomerParty)'));
+
+        // And certainly no empty buyer identification.
+        $this->assertEquals(0, $xpath->evaluate('count(//cac:AccountingCustomerParty//cbc:ID)'));
+    }
+
+    /**
+     * Standard (B2B) invoice with a fully populated buyer must still emit the
+     * full AccountingCustomerParty structure.
+     */
+    public function testStandardBuyerEmitsFullParty()
+    {
+        $invoiceData = new InvoiceData();
+        $invoiceData->standard()
+            ->setInvoiceNumber('INV-B2B-001')
+            ->setIssueDate('2024-01-15')
+            ->setIssueTime('10:30:00')
+            ->setDocumentCurrencyCode('SAR');
+
+        $buyer = new BuyerData();
+        $buyer->setRegistrationName('Customer Company')
+            ->setVatNumber('987654321098765')
+            ->setPartyIdentification('987654321098765')
+            ->setPartyIdentificationId('TIN')
+            ->setStreetName('Customer Street')
+            ->setBuildingNumber('1234')
+            ->setCityName('Jeddah')
+            ->setPostalZone('23456')
+            ->setCountryCode('SA');
+        $invoiceData->setBuyer($buyer);
+
+        $line = new InvoiceLineData();
+        $line->setId(1)
+            ->setItemName('Test Product')
+            ->setQuantity(1)
+            ->setUnitPrice(100.00)
+            ->setTaxPercent(15.0)
+            ->calculateTotals();
+        $invoiceData->addLine($line);
+        $invoiceData->calculateTotals();
+
+        $zatcaInvoice = new ZatcaInvoice();
+        $xml = $zatcaInvoice->generateXml($invoiceData);
+        $xpath = $this->xpath($xml);
+
+        $base = '//cac:AccountingCustomerParty/cac:Party';
+        $this->assertEquals(1, $xpath->evaluate("count($base/cac:PartyIdentification)"));
+        $this->assertEquals('987654321098765', $xpath->evaluate("string($base/cac:PartyIdentification/cbc:ID)"));
+        $this->assertEquals(1, $xpath->evaluate("count($base/cac:PostalAddress)"));
+        $this->assertEquals('987654321098765', $xpath->evaluate("string($base/cac:PartyTaxScheme/cbc:CompanyID)"));
+        $this->assertEquals('Customer Company', $xpath->evaluate("string($base/cac:PartyLegalEntity/cbc:RegistrationName)"));
     }
 }
