@@ -467,10 +467,13 @@ Same methods as SellerData. For simplified invoices, `setVatNumber()` is optiona
 | `setUnitCode($code)` | `string` | No | Unit code (default: `EA`) |
 | `setItemCode($code)` | `string` | No | Item code |
 | `calculateTotals()` | — | Yes | Auto-calculates all amounts from qty × price × tax% |
-| `setAllowanceAmount($amt)` | `float` | No | Line-level discount (set before calculateTotals) |
+| `setAllowanceAmount($amt)` | `float` | No | Line-level discount total (set before calculateTotals). `setUnitPrice()` is the gross, pre-discount unit price. |
+| `setAllowanceReason($reason)` | `string` | No | Reason for the line discount (default: `discount`) |
 | `setChargeAmount($amt)` | `float` | No | Line-level charge (set before calculateTotals) |
 
 > **Tip:** Call `calculateTotals()` on each line item, then call `calculateTotals()` on the invoice. This auto-fills `lineExtensionAmount`, `taxAmount`, `taxExclusiveAmount`, `taxInclusiveAmount`, and all invoice-level totals.
+
+> **See also:** [Line discounts (BG-27) & B2B/B2C buyer party](docs/allowances-and-buyer.md) — how a line discount becomes a valid `cac:AllowanceCharge`, and how the buyer party differs between Standard (B2B) and Simplified (B2C) invoices.
 
 ### Previous Invoice Hash (PIH) Chain
 
@@ -555,7 +558,8 @@ zatca-php/
 │   ├── certificate-generation.php     # CSR generation example
 │   └── invoice-types.php              # Standard, simplified, credit, debit, prepayment
 ├── docs/
-│   └── API.md                         # Detailed API reference
+│   ├── API.md                         # Detailed API reference
+│   └── allowances-and-buyer.md        # Line discounts (BG-27) & B2B/B2C buyer party
 ├── tests/
 │   └── ZatcaInvoiceTest.php
 ├── composer.json

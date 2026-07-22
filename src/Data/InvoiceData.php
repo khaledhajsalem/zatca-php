@@ -405,32 +405,35 @@ class InvoiceData
      */
     public function calculateTotals(): self
     {
-        $taxExclusiveAmount = 0.0;
+        $lineNetTotal = 0.0;
         $taxTotalAmount = 0.0;
-        $allowanceTotalAmount = 0.0;
-        $chargeTotalAmount = 0.0;
 
+        // Each line's taxExclusiveAmount is already NET of its own line-level
+        // allowance/charge (see InvoiceLineData::calculateTotals()). Summing the
+        // net amounts here means line allowances must NOT be subtracted again.
         foreach ($this->lines as $line) {
-            $taxExclusiveAmount += $line->getTaxExclusiveAmount();
+            $lineNetTotal += $line->getTaxExclusiveAmount();
             $taxTotalAmount += $line->getTaxAmount();
-            $allowanceTotalAmount += $line->getAllowanceAmount();
-            $chargeTotalAmount += $line->getChargeAmount();
         }
 
-        // Add document-level allowances and charges
+        // Only DOCUMENT-level allowances/charges adjust the invoice totals.
+        $documentAllowance = 0.0;
         foreach ($this->allowances as $allowance) {
-            $allowanceTotalAmount += $allowance['amount'] ?? 0.0;
+            $documentAllowance += $allowance['amount'] ?? 0.0;
         }
 
+        $documentCharge = 0.0;
         foreach ($this->charges as $charge) {
-            $chargeTotalAmount += $charge['amount'] ?? 0.0;
+            $documentCharge += $charge['amount'] ?? 0.0;
         }
 
-        $this->taxExclusiveAmount = $taxExclusiveAmount;
         $this->taxTotalAmount = $taxTotalAmount;
-        $this->allowanceTotalAmount = $allowanceTotalAmount;
-        $this->chargeTotalAmount = $chargeTotalAmount;
-        $this->taxInclusiveAmount = $taxExclusiveAmount + $taxTotalAmount + $chargeTotalAmount - $allowanceTotalAmount;
+        // Reported document-level allowance/charge sums (BT-107 / BT-108).
+        // Line-level allowances are expressed on each line, not here.
+        $this->allowanceTotalAmount = $documentAllowance;
+        $this->chargeTotalAmount = $documentCharge;
+        $this->taxExclusiveAmount = $lineNetTotal - $documentAllowance + $documentCharge;
+        $this->taxInclusiveAmount = $this->taxExclusiveAmount + $this->taxTotalAmount;
         $this->payableAmount = $this->taxInclusiveAmount;
 
         return $this;

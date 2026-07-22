@@ -276,35 +276,36 @@ class ZatcaInvoice
         }
 
         $buyer = $invoiceData->getBuyer();
-        $accountingCustomerParty = $dom->createElement('cac:AccountingCustomerParty');
+        $isSimplified = $invoiceData->isSimplified();
         $party = $dom->createElement('cac:Party');
 
-        // Party identification with schemeID
-        $partyIdentification = $dom->createElement('cac:PartyIdentification');
-        $idElement = $dom->createElement('cbc:ID', $buyer->getPartyIdentification());
-        $idElement->setAttribute('schemeID', $buyer->getPartyIdentificationId());
-        $partyIdentification->appendChild($idElement);
-        $party->appendChild($partyIdentification);
-//
-//        // Party name
-//        $partyName = $dom->createElement('cac:PartyName');
-//        $this->appendElement($dom, $partyName, 'cbc:Name', $buyer->getRegistrationName());
-//        $party->appendChild($partyName);
+        // Party identification: only when the buyer actually has an identifier.
+        // Never emit an empty <cbc:ID>/empty schemeID.
+        if ($buyer->getPartyIdentification() !== '') {
+            $partyIdentification = $dom->createElement('cac:PartyIdentification');
+            $idElement = $dom->createElement('cbc:ID', $buyer->getPartyIdentification());
+            $idElement->setAttribute('schemeID', $buyer->getPartyIdentificationId());
+            $partyIdentification->appendChild($idElement);
+            $party->appendChild($partyIdentification);
+        }
 
-        // Postal address
-        $postalAddress = $dom->createElement('cac:PostalAddress');
-        $this->appendElement($dom, $postalAddress, 'cbc:StreetName', $buyer->getStreetName());
-        $this->appendElement($dom, $postalAddress, 'cbc:BuildingNumber', $buyer->getBuildingNumber());
-        $this->appendElement($dom, $postalAddress, 'cbc:PlotIdentification', $buyer->getPlotIdentification());
-        $this->appendElement($dom, $postalAddress, 'cbc:CitySubdivisionName', $buyer->getCitySubdivisionName());
-        $this->appendElement($dom, $postalAddress, 'cbc:CityName', $buyer->getCityName());
-        $this->appendElement($dom, $postalAddress, 'cbc:PostalZone', $buyer->getPostalZone());
-        $this->appendElement($dom, $postalAddress, 'cbc:CountrySubentity', $buyer->getCityName());
-        
-        $country = $dom->createElement('cac:Country');
-        $this->appendElement($dom, $country, 'cbc:IdentificationCode', $buyer->getCountryCode());
-        $postalAddress->appendChild($country);
-        $party->appendChild($postalAddress);
+        // Postal address: omitted entirely for simplified (B2C) invoices.
+        // For standard invoices, emit only the sub-elements that have a value.
+        if (!$isSimplified) {
+            $postalAddress = $dom->createElement('cac:PostalAddress');
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:StreetName', $buyer->getStreetName());
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:BuildingNumber', $buyer->getBuildingNumber());
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:PlotIdentification', $buyer->getPlotIdentification());
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:CitySubdivisionName', $buyer->getCitySubdivisionName());
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:CityName', $buyer->getCityName());
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:PostalZone', $buyer->getPostalZone());
+            $this->appendElementIfNotEmpty($dom, $postalAddress, 'cbc:CountrySubentity', $buyer->getCityName());
+
+            $country = $dom->createElement('cac:Country');
+            $this->appendElementIfNotEmpty($dom, $country, 'cbc:IdentificationCode', $buyer->getCountryCode());
+            $postalAddress->appendChild($country);
+            $party->appendChild($postalAddress);
+        }
 
         if (!empty($buyer->getVatNumber())) {
             // Party tax scheme
@@ -317,11 +318,20 @@ class ZatcaInvoice
             $party->appendChild($partyTaxScheme);
         }
 
-        // Party legal entity
-        $partyLegalEntity = $dom->createElement('cac:PartyLegalEntity');
-        $this->appendElement($dom, $partyLegalEntity, 'cbc:RegistrationName', $buyer->getRegistrationName());
-        $party->appendChild($partyLegalEntity);
+        // Party legal entity: only when a registration name is provided.
+        if ($buyer->getRegistrationName() !== '') {
+            $partyLegalEntity = $dom->createElement('cac:PartyLegalEntity');
+            $this->appendElement($dom, $partyLegalEntity, 'cbc:RegistrationName', $buyer->getRegistrationName());
+            $party->appendChild($partyLegalEntity);
+        }
 
+        // If nothing at all could be emitted for the buyer (e.g. a simplified
+        // invoice to an unidentified walk-in), omit AccountingCustomerParty.
+        if (!$party->hasChildNodes()) {
+            return;
+        }
+
+        $accountingCustomerParty = $dom->createElement('cac:AccountingCustomerParty');
         $accountingCustomerParty->appendChild($party);
         $rootInvoice->appendChild($accountingCustomerParty);
     }
@@ -519,8 +529,19 @@ class ZatcaInvoice
             $invoicedQuantity->setAttribute('unitCode', 'PCE');
             $invoiceLine->appendChild($invoicedQuantity);
             
-            $this->appendElementWithCurrency($dom, $invoiceLine, 'cbc:LineExtensionAmount', $line->getLineExtensionAmount(), $invoiceData->getDocumentCurrencyCode());
-            
+            // LineExtensionAmount is the NET line amount (gross - line allowance).
+            $this->appendElementWithCurrency($dom, $invoiceLine, 'cbc:LineExtensionAmount', $line->getTaxExclusiveAmount(), $invoiceData->getDocumentCurrencyCode());
+
+            // Line-level allowance (BG-27). Must sit between LineExtensionAmount
+            // and TaxTotal per the UBL InvoiceLine element order.
+            if ($line->getAllowanceAmount() > 0) {
+                $ac = $dom->createElement('cac:AllowanceCharge');
+                $this->appendElement($dom, $ac, 'cbc:ChargeIndicator', 'false');
+                $this->appendElement($dom, $ac, 'cbc:AllowanceChargeReason', $line->getAllowanceReason());
+                $this->appendElementWithCurrency($dom, $ac, 'cbc:Amount', $line->getAllowanceAmount(), $invoiceData->getDocumentCurrencyCode());
+                $invoiceLine->appendChild($ac);
+            }
+
             // Tax total for line
             $taxTotal = $dom->createElement('cac:TaxTotal');
             $this->appendElementWithCurrency($dom, $taxTotal, 'cbc:TaxAmount', $line->getTaxAmount(), $invoiceData->getDocumentCurrencyCode());
@@ -543,17 +564,11 @@ class ZatcaInvoice
             $invoiceLine->appendChild($taxTotal);
             $invoiceLine->appendChild($item);
             
-            // Price with AllowanceCharge
+            // Price with the GROSS (pre-discount) unit price. The discount is
+            // expressed once, as the line-level AllowanceCharge above.
             $price = $dom->createElement('cac:Price');
             $this->appendElementWithCurrency($dom, $price, 'cbc:PriceAmount', $line->getUnitPrice(), $invoiceData->getDocumentCurrencyCode());
-            
-            // Add AllowanceCharge to price
-            $allowanceCharge = $dom->createElement('cac:AllowanceCharge');
-            $this->appendElement($dom, $allowanceCharge, 'cbc:ChargeIndicator', 'false');
-            $this->appendElement($dom, $allowanceCharge, 'cbc:AllowanceChargeReason', 'discount');
-            $this->appendElementWithCurrency($dom, $allowanceCharge, 'cbc:Amount', 0.00, $invoiceData->getDocumentCurrencyCode());
-            $price->appendChild($allowanceCharge);
-            
+
             $invoiceLine->appendChild($price);
             
             
@@ -569,6 +584,17 @@ class ZatcaInvoice
         $element = $dom->createElement($name, $value);
         $parent->appendChild($element);
         return $element;
+    }
+
+    /**
+     * Helper method to append an element only when the value is a non-empty string.
+     */
+    protected function appendElementIfNotEmpty(DOMDocument $dom, DOMElement $parent, string $name, string $value): ?DOMElement
+    {
+        if ($value === '') {
+            return null;
+        }
+        return $this->appendElement($dom, $parent, $name, $value);
     }
 
     /**

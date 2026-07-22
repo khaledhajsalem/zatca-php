@@ -18,6 +18,7 @@ class InvoiceLineData
     protected float $taxExclusiveAmount = 0.0;
     protected float $taxInclusiveAmount = 0.0;
     protected float $allowanceAmount = 0.0;
+    protected string $allowanceReason = 'discount';
     protected float $chargeAmount = 0.0;
     protected string $unitCode = 'EA';
     protected string $itemCode = '';
@@ -142,6 +143,17 @@ class InvoiceLineData
     public function getAllowanceAmount(): float
     {
         return $this->allowanceAmount;
+    }
+
+    public function setAllowanceReason(string $allowanceReason): self
+    {
+        $this->allowanceReason = $allowanceReason;
+        return $this;
+    }
+
+    public function getAllowanceReason(): string
+    {
+        return $this->allowanceReason;
     }
 
     public function setChargeAmount(float $chargeAmount): self

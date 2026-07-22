@@ -82,6 +82,17 @@ try {
     echo "QR Code: " . $result['qr_code'] . "\n\n";
 
     // Example 2: Simplified Tax Invoice (B2C) - No Clearance Required
+    //
+    // For a B2C invoice to an unidentified walk-in customer, simply omit the
+    // buyer (do NOT call setBuyer). The package will not emit an empty
+    // cac:AccountingCustomerParty. If you do have a buyer name/ID, set it and
+    // only the provided fields are emitted (no empty postal address or tax
+    // scheme for simplified invoices).
+    //
+    // This example also shows a line-level discount (BG-27): setUnitPrice() is
+    // the GROSS unit price and setAllowanceAmount() is the total line discount.
+    // The line is emitted as a cac:AllowanceCharge and LineExtensionAmount is
+    // the net amount (50.00 - 5.00 = 45.00).
     echo "=== Simplified Tax Invoice (B2C) - No Clearance Required ===\n";
     $simplifiedInvoice = new InvoiceData();
     $simplifiedInvoice->setInvoiceNumber('INV-002')
@@ -90,14 +101,16 @@ try {
         ->setIssueDate('2025-09-15')
         ->setIssueTime('10:30:00')
         ->setCurrencyCode('SAR')
-        ->setSeller($seller)
-        ->setBuyer($buyer);
+        ->setSeller($seller);
+        // No setBuyer(): walk-in customer -> AccountingCustomerParty is omitted.
 
     $line = new InvoiceLineData();
     $line->setId(1)
         ->setItemName('Product 2')
         ->setQuantity(1)
-        ->setUnitPrice(50.00)
+        ->setUnitPrice(50.00)             // gross unit price
+        ->setAllowanceAmount(5.00)        // total line discount
+        ->setAllowanceReason('Promotional discount')
         ->setTaxPercent(15.0)
         ->calculateTotals();
 
