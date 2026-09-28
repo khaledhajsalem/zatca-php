@@ -124,27 +124,19 @@ class ZatcaAPIService
         string $invoiceHash,
         string $uuid
     ): array {
-        try {
-            $response = $this->sendRequest(
-                'POST',
-                '/compliance/invoices',
-                ['Accept-Language' => 'en', 'Content-Type' => 'application/json'],
-                [
-                    'invoiceHash' => $invoiceHash,
-                    'uuid'        => $uuid,
-                    'invoice'     => base64_encode($signedInvoice),
-                ],
-                $this->createAuthHeaders($certificate, $secret)
-            );
-
-            return $response;
-        } catch (ZatcaApiException $e) {
-            if ($this->allowWarnings) {
-                // Handle warnings if allowed
-                return [];
-            }
-            throw $e;
-        }
+        // Warnings are returned as successful (202) responses by sendRequest(),
+        // so any exception here is a real failure and must not be swallowed.
+        return $this->sendRequest(
+            'POST',
+            '/compliance/invoices',
+            ['Accept-Language' => 'en', 'Content-Type' => 'application/json'],
+            [
+                'invoiceHash' => $invoiceHash,
+                'uuid'        => $uuid,
+                'invoice'     => base64_encode($signedInvoice),
+            ],
+            $this->createAuthHeaders($certificate, $secret)
+        );
     }
 
     /**
@@ -340,9 +332,9 @@ class ZatcaAPIService
 
             if (!$this->isSuccessfulResponse($statusCode)) {
                 $responseData = $this->parseResponse($response);
-                $errorMessage = $statusCode === 400 
-                    ? "ZATCA API validation error" 
-                    : "ZATCA API returned error response";
+                $errorMessage = $statusCode === 400
+                    ? "ZATCA API validation error"
+                    : "ZATCA API returned HTTP $statusCode " . $response->getReasonPhrase();
                     
                 throw new ZatcaApiException($errorMessage, [
                     'endpoint' => $url,
@@ -383,14 +375,23 @@ class ZatcaAPIService
     private function parseResponse($response): array
     {
         $content = $response->getBody()->getContents();
+
+        // Some error responses (e.g. 401 Unauthorized) have an empty body.
+        if (trim($content) === '') {
+            return [];
+        }
+
         $data = json_decode($content, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
             $error = json_last_error_msg();
-            throw new ZatcaApiException('Failed to parse API response: ' . $error);
+            throw new ZatcaApiException('Failed to parse API response: ' . $error, [
+                'status_code' => $response->getStatusCode(),
+                'body' => $content,
+            ]);
         }
 
-        return $data;
+        return is_array($data) ? $data : [];
     }
 
     /**

@@ -332,7 +332,9 @@ class InvoiceExtension
             new Seller($this->find("cac:AccountingSupplierParty/cac:Party/cac:PartyLegalEntity/cbc:RegistrationName")->toText()),
             new TaxNumber($this->find("cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID")->toText()),
             new InvoiceDate($issueDate . 'T' . $issueTime),
-            new InvoiceTotalAmount($this->find("cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount")->toText()),
+            // Tag 4 is the amount due (BT-115), which differs from the total
+            // with VAT when there is a prepayment or rounding amount.
+            new InvoiceTotalAmount($this->find("cac:LegalMonetaryTotal/cbc:PayableAmount")->toText()),
             new InvoiceTaxAmount($this->find("cac:TaxTotal")->toText()),
             new InvoiceHash($invoiceDigest),
             new InvoiceDigitalSignature($signatureValue),

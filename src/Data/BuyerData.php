@@ -16,6 +16,7 @@ class BuyerData
     protected string $cityName = '';
     protected string $postalZone = '';
     protected string $streetName = '';
+    protected string $additionalStreetName = '';
     protected string $buildingNumber = '';
     protected string $plotIdentification = '';
     protected string $citySubdivisionName = '';
@@ -117,6 +118,20 @@ class BuyerData
     public function getStreetName(): string
     {
         return $this->streetName;
+    }
+
+    /**
+     * Additional street name (BT-36 / BT-51). Optional.
+     */
+    public function setAdditionalStreetName(string $additionalStreetName): self
+    {
+        $this->additionalStreetName = $additionalStreetName;
+        return $this;
+    }
+
+    public function getAdditionalStreetName(): string
+    {
+        return $this->additionalStreetName;
     }
 
     public function setBuildingNumber(string $buildingNumber): self

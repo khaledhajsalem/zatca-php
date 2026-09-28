@@ -4,6 +4,8 @@ namespace KhaledHajSalem\Zatca;
 
 use KhaledHajSalem\Zatca\Data\InvoiceData;
 use KhaledHajSalem\Zatca\Exceptions\ZatcaException;
+use KhaledHajSalem\Zatca\Exceptions\ZatcaValidationException;
+use KhaledHajSalem\Zatca\Validation\InvoiceValidator;
 use KhaledHajSalem\Zatca\Services\ZatcaAPIService;
 use KhaledHajSalem\Zatca\Support\Certificate;
 use KhaledHajSalem\Zatca\Support\InvoiceSigner;
@@ -27,7 +29,10 @@ class ZatcaManager
             'secret' => '',
             'timeout' => 30,
             'verify_ssl' => true,
-            'allow_warnings' => true
+            'allow_warnings' => true,
+            // Validate invoice data before submission and throw
+            // ZatcaValidationException on errors (warnings don't block).
+            'validate' => false,
         ], $config);
 
         $this->validateConfig();
@@ -44,6 +49,13 @@ class ZatcaManager
      */
     public function processInvoice(InvoiceData $invoiceData, bool $isRetry = false): array
     {
+        if ($this->config['validate']) {
+            $errors = InvoiceValidator::errors($invoiceData->validate());
+            if (!empty($errors)) {
+                throw new ZatcaValidationException($errors);
+            }
+        }
+
         try {
             // Generate UUID for the invoice first
             $uuid = $this->generateUUID();

@@ -158,7 +158,9 @@ Produces the full customer party:
 ### B2C — walk-in buyer
 
 For a simplified invoice to an unidentified walk-in (no VAT, no identification,
-no address, no name), the buyer party is **omitted entirely**:
+no address, no name), or with no buyer set at all, the buyer party contains
+only the country. UBL requires `cac:AccountingCustomerParty`, and ZATCA forbids
+empty elements (BR-KSA-F-03), so this is the smallest valid form:
 
 ```php
 $invoiceData->simplified();
@@ -167,7 +169,20 @@ $buyer = new BuyerData(); // nothing set
 $invoiceData->setBuyer($buyer);
 ```
 
-The generated XML contains **no** `cac:AccountingCustomerParty` element at all.
+```xml
+<cac:AccountingCustomerParty>
+  <cac:Party>
+    <cac:PostalAddress>
+      <cac:Country>
+        <cbc:IdentificationCode>SA</cbc:IdentificationCode>
+      </cac:Country>
+    </cac:PostalAddress>
+  </cac:Party>
+</cac:AccountingCustomerParty>
+```
+
+The country is the buyer's country code (default `SA`). Earlier versions
+omitted the element entirely, which fails ZATCA's schema validation.
 
 If only a name is provided, the party contains just the legal entity:
 

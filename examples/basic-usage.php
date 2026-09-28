@@ -13,23 +13,26 @@ use KhaledHajSalem\Zatca\Exceptions\ZatcaException;
 
 try {
     // 1. Initialize ZATCA Manager
+    // storage/ holds sandbox credentials; run certificate-generation.php to refresh them.
     $zatcaManager = new ZatcaManager([
         'environment' => 'sandbox', // or 'simulation', 'production'
         'certificate_path' => __DIR__ . '/../storage/certificate.pem',
         'private_key_path' => __DIR__ . '/../storage/private.pem',
-        'secret' => 'CkYsEXfV8c1gFHAtFWoZv73pGMvh/Qyo4LzKM2h/8Hg=' // This is the secret key for the ZATCA API
+        'secret' => trim(file_get_contents(__DIR__ . '/../storage/secret.txt')), // API secret returned with the certificate
+        'validate' => true, // Check ZATCA business rules before submitting
     ]);
 
     // 2. Create invoice data
     $invoiceData = new InvoiceData();
     $invoiceData->setInvoiceNumber('INV-001')
-        ->simplified() // Standard Invoice (requires clearance)
+        ->simplified() // Simplified Tax Invoice (B2C, reported); use ->standard() for B2B (cleared)
         ->taxInvoice() // Tax Invoice (388)
         ->setIssueDate(date('Y-m-d'))
         ->setIssueTime(date('H:i:s'))
         ->setDueDate(date('Y-m-d'))
-        ->setCurrencyCode('SAR')
-        ->setDocumentCurrencyCode('SAR');
+        ->setDocumentCurrencyCode('SAR')
+        ->setInvoiceCounter('1') // ICV: increment for every invoice
+        ->setPreviousInvoiceHash(InvoiceData::FIRST_INVOICE_HASH); // PIH: hash of the previous invoice
 
     // 3. Set seller information
     $seller = new SellerData();
@@ -37,7 +40,6 @@ try {
         ->setVatNumber('399999999900003')
         ->setPartyIdentification('1010203020')
         ->setPartyIdentificationId('CRN') // Commercial Registration Number
-        ->setAddress('123 Main Street, Riyadh, Saudi Arabia')
         ->setCountryCode('SA')
         ->setCityName('Riyadh')
         ->setPostalZone('12345')
@@ -54,7 +56,6 @@ try {
         ->setVatNumber('300000000000003')
         ->setPartyIdentification('1010203030')
         ->setPartyIdentificationId('CRN') // Commercial Registration Number
-        ->setAddress('456 Customer Street, Jeddah, Saudi Arabia')
         ->setCountryCode('SA')
         ->setCityName('Jeddah')
         ->setPostalZone('54321')
@@ -107,7 +108,7 @@ try {
     $warningMessages = $result['response']['validationResults']['warningMessages'] ?? [];
     $errorMessages = $result['response']['validationResults']['errorMessages'] ?? [];
     
-    $xmlSavedPath = 'signed-invoice.xml';
+    $xmlSavedPath = __DIR__ . '/signed-invoice.xml';
     file_put_contents($xmlSavedPath, $result['xml']);
 
     $isSuccess = ($status === 'PASS' || $status === 'WARNING');
