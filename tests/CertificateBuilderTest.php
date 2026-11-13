@@ -48,6 +48,34 @@ class CertificateBuilderTest extends TestCase
         $this->assertSame('secp256k1', $details['ec']['curve_name']);
     }
 
+    /**
+     * @dataProvider invoiceTypes
+     */
+    public function testInvoiceTypeIsWrittenWithFourDigits(int $type, string $expected): void
+    {
+        $builder = $this->builder()->setInvoiceType($type);
+        $builder->generate();
+
+        // The flag is the "title" attribute of the subject alternative name.
+        // It is a short ASCII value, so it can be read from the DER directly:
+        // OID 2.5.4.12 (title) followed by its string.
+        $der = base64_decode(preg_replace('/-----[^-]+-----|\s+/', '', $builder->getCsr()));
+        $position = strpos($der, "\x55\x04\x0c");
+
+        $this->assertNotFalse($position, 'The CSR has no title attribute');
+        $length = ord($der[$position + 4]);
+        $this->assertSame($expected, substr($der, $position + 5, $length));
+    }
+
+    public function invoiceTypes(): array
+    {
+        return [
+            'standard and simplified' => [1100, '1100'],
+            'standard only' => [1000, '1000'],
+            'simplified only' => [100, '0100'],
+        ];
+    }
+
     public function testPrivateKeyIsAvailableWithoutTouchingTheDisk(): void
     {
         $builder = $this->builder();

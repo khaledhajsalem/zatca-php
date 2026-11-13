@@ -128,8 +128,10 @@ EOL;
     }
 
     /**
-     * Set invoice type (0- to 4-digit number).
-     * Four digits, each digit acting as a bool. The order is as follows: Standard Invoice, Simplified, future use, future use
+     * Set the invoice types the unit issues: four digits, each 0 or 1, in the
+     * order standard, simplified, reserved, reserved. Pass 1100 for both,
+     * 1000 for standard only and 100 (that is, "0100") for simplified only;
+     * the value is written to the CSR zero padded to four digits.
      */
     public function setInvoiceType(int $type): self {
         if ($type < 0 || $type > 9999) {
@@ -301,7 +303,9 @@ EOL;
         $dirSection = [
             'SN'                => $this->serialNumber,
             'UID'               => $this->organizationIdentifier,
-            'title'             => (string)$this->invoiceType,
+            // Four digits, zero padded: a simplified-only unit is "0100",
+            // not "100".
+            'title'             => sprintf('%04d', $this->invoiceType),
             'registeredAddress' => $this->address,
             'businessCategory'  => $this->businessCategory,
         ];
