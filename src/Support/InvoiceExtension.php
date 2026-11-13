@@ -21,14 +21,6 @@ class InvoiceExtension
 {
     public const NS_PREFIX = '__uxml_ns_';
 
-    /**
-     * Array to store DOMElement => InvoiceExtension mapping.
-     * Using array instead of WeakMap for better compatibility.
-     *
-     * @var array<int, self>
-     */
-    private static $elements = [];
-
     /** @var DOMElement */
     protected DOMElement $element;
 
@@ -64,8 +56,11 @@ class InvoiceExtension
      */
     public static function fromElement(DOMElement $element): self
     {
-        $elementId = spl_object_id($element);
-        return self::$elements[$elementId] ?? new self($element);
+        // Wrappers are cheap and stateless, so a new one is created each
+        // time. Earlier versions kept every wrapper in a static registry,
+        // which grew without bound in long-running processes (queue
+        // workers, Octane) and kept every parsed document in memory.
+        return new self($element);
     }
 
     /**
@@ -123,8 +118,6 @@ class InvoiceExtension
     private function __construct(DOMElement $element)
     {
         $this->element = $element;
-        $elementId = spl_object_id($element);
-        self::$elements[$elementId] = $this;
     }
 
     /**
@@ -359,7 +352,16 @@ class InvoiceExtension
      */
     public function computeXmlDigest(): string
     {
-        $clonedXml = clone $this;
+        // Work on a copy so this element is left untouched. (A plain
+        // "clone $this" shares the DOM node and would strip the signature
+        // and QR blocks from the original document.) The copy is made by
+        // serialising and re-parsing: importNode() would hoist the
+        // namespace declarations of the signature block onto the root
+        // element, which changes the canonical form and therefore the hash.
+        $copy = new DOMDocument();
+        $copy->preserveWhiteSpace = true;
+        $copy->loadXML($this->element->ownerDocument->saveXML($this->element));
+        $clonedXml = new self($copy->documentElement);
 
         // Remove unwanted elements for digest computation.
         $clonedXml->removeByXpath('ext:UBLExtensions');

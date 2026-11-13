@@ -31,8 +31,9 @@ A PHP package for ZATCA (Saudi Arabia) Phase 2 e-invoicing. Handles XML generati
 ## Requirements
 
 - PHP 8.0+
-- OpenSSL extension
+- OpenSSL extension (with the `secp256k1` curve)
 - Composer
+- Guzzle 7 or 8 (installed automatically)
 
 ## Installation
 
@@ -141,6 +142,15 @@ $builder->setOrganizationIdentifier('300000000000003') // 15 digits, starts & en
     ->setBusinessCategory('Legal Entity');
 
 $builder->generateAndSave('storage/certificate.csr', 'storage/private.pem');
+```
+
+To keep the private key off the disk (for example to store it encrypted in a database), generate in memory instead:
+
+```php
+$builder->generate();
+
+$csr = $builder->getCsr();               // send to ZATCA
+$privateKey = $builder->getPrivateKey(); // PEM string, not passphrase protected: store it encrypted
 ```
 
 **What happens next:**
@@ -479,6 +489,9 @@ $result = $zatcaManager->processInvoice($debitNote);
 | `setDocumentCurrencyCode($code)` | `string` | Yes | Usually same as currency code |
 | `setTaxCurrencyCode($code)` | `string` | Yes | Must be `SAR` (BR-KSA-EN16931-02) |
 | `setTaxExchangeRate($rate)` | `float` | If currency ≠ SAR | 1 unit of the invoice currency in SAR, used for the SAR VAT total (BT-111) |
+| `setPurchaseOrderReference($id)` | `string` | No | Buyer's purchase order (BT-13), up to 127 characters |
+| `setContractReference($id)` | `string` | No | Contract reference (BT-12), up to 127 characters |
+| `setTaxPointDate($date)` | `string` | No | VAT point date (BT-7), format `Y-m-d` |
 | `setInvoiceCounter($icv)` | `string` | Yes | Sequential counter starting at `1` |
 | `setPreviousInvoiceHash($pih)` | `string` | Yes | `InvoiceData::FIRST_INVOICE_HASH` for first invoice (the default) |
 | `thirdParty()` / `nominal()` / `export()` / `summary()` / `selfBilled()` | `bool` | No | KSA-2 flags. See [Transaction Flags](#transaction-flags-ksa-2) |
@@ -492,8 +505,9 @@ $result = $zatcaManager->processInvoice($debitNote);
 | `setBuyer($buyer)` | `BuyerData` | Yes | Buyer information |
 | `addLine($line)` | `InvoiceLineData` | Yes | At least one line required |
 | `calculateTotals()` | — | Yes | Call after adding all lines |
-| `addBillingReference($ref)` | `array` | For CN/DN | Keys: `id`, `uuid` |
-| `addPaymentMeans($pm)` | `array` | No | Keys: `code` (10, 30, 42, 48, 1), `instruction_note`, `due_date`, `channel_code`, `payment_id` |
+| `addBillingReference($ref)` | `array` | For CN/DN | Keys: `id`, `uuid`, `issue_date` |
+| `addDocumentReference($ref)` | `array` | No | Additional document reference. Keys: `id`, `type` |
+| `addPaymentMeans($pm)` | `array` | No | Keys: `code` (10, 30, 42, 48, 1), `instruction_note`, `due_date`, `channel_code`, `payment_id`, `account_id` (BT-84), `payment_terms` (KSA-22) |
 | `addAllowance($allowance)` | `array` | No | Document-level discount. Keys: `amount`, `reason` (default `discount`), `reason_code` (UNTDID 5189, e.g. `95`), `base_amount` + `multiplier` (percentage, both or neither; `amount` is computed if omitted), `tax_category`, `tax_percent` |
 | `addCharge($charge)` | `array` | No | Document-level charge. Same keys as `addAllowance()`; `reason` and `reason_code` (UNTDID 7161, e.g. `FC` = freight) are **required** |
 
@@ -518,6 +532,13 @@ $result = $zatcaManager->processInvoice($debitNote);
 
 Same methods as SellerData. For simplified invoices, `setVatNumber()` is optional.
 
+| Method | Type | Required | Description |
+|--------|------|----------|-------------|
+| `setContact($name, $telephone, $email, $note)` | `string` | No | Buyer contact (`cac:Contact`). Several e-mail addresses may be separated by `;` |
+| `setCompanyLegalForm($form)` | `string` | No | Company legal form (KSA-40) |
+
+Identifier formats ZATCA checks (a mismatch is accepted with a warning): `TIN` 10 digits starting with 3, `CRN` 10 digits, `700` 10 digits starting with 7, `NAT` 10 digits starting with 1, `IQA` 10 digits starting with 2. Any identifier with eight or more repeated or sequential digits is flagged as a placeholder (BR-KSA-F-13).
+
 ### InvoiceLineData — All Setters
 
 | Method | Type | Required | Description |
@@ -527,7 +548,7 @@ Same methods as SellerData. For simplified invoices, `setVatNumber()` is optiona
 | `setDescription($desc)` | `string` | No | Item description (`cac:Item/cbc:Description`) |
 | `setQuantity($qty)` | `float` | Yes | Quantity |
 | `setUnitPrice($price)` | `float` | Yes | Unit price (tax-exclusive) |
-| `setTaxPercent($pct)` | `float` | Yes | VAT percentage (e.g., `15.0`). Ignored (0%) for `Z`, `E` and `O` lines |
+| `setTaxPercent($pct)` | `float` | Yes | VAT percentage: `15.0` or `5.0` for standard-rated lines (BR-KSA-84; ZATCA rejects any other rate). Ignored (0%) for `Z`, `E` and `O` lines |
 | `setTaxCategory($cat, $reasonCode, $reasonText)` | `string` | No | VAT category: `S` (default), `Z`, `E` or `O`. See [Zero-rated, exempt & out-of-scope items](#zero-rated-exempt--out-of-scope-items) |
 | `setUnitCode($code)` | `string` | No | UN/ECE Rec 20 unit code (default: `PCE`) |
 | `setItemCode($code)` | `string` | No | Seller's item code (BT-155) |
@@ -542,6 +563,8 @@ Same methods as SellerData. For simplified invoices, `setVatNumber()` is optiona
 | `setChargeAmount($amt)` | `float` | No | Line-level charge (set before calculateTotals). Requires `setChargeReason()` and `setChargeReasonCode()` |
 | `setChargeReason($reason)` | `string` | With a charge | Reason for the line charge (BR-KSA-22) |
 | `setChargeReasonCode($code)` | `string` | With a charge | UNTDID 7161 code (e.g. `CG` = cleaning) (BR-KSA-20) |
+| `addAllowance($allowance)` | `array` | No | A further line discount; a line may have several. Keys: `amount`, `reason`, `reason_code`, `base_amount` + `multiplier` (percentage) |
+| `addCharge($charge)` | `array` | No | A further line charge. Same keys; `reason` and `reason_code` are required |
 
 > **Rounding:** amounts are rounded half-up to 2 decimals at each step (line net, line VAT, VAT per category, totals), as the standard requires. Unit prices and quantities keep their decimals.
 
@@ -636,16 +659,18 @@ try {
 
 | Area | Rules |
 |------|-------|
-| Header | Invoice number, issue date (valid, not in the future), issue time format, date formats, currency codes, ICV digits, previous invoice hash (BR-02/03, BR-KSA-04/26/34/70, BR-KSA-F-01, BR-CL-04, BR-KSA-EN16931-02) |
+| Header | Invoice number, invoice type code, issue date (valid, not in the future), issue time format, date formats, currency codes, ICV digits, previous invoice hash, foreign-currency VAT totals, 24-hour reporting window for simplified invoices (BR-02/03, BR-KSA-04/05/26/34/70/97/98, BR-KSA-F-01, BR-CL-04, BR-KSA-EN16931-02) |
 | Seller | Name, VAT number format, identification and scheme, full address, 4-digit building number, 5-digit postal code, country code (BR-06, BR-KSA-08/09/37/39/40/66, BR-CL-14) |
 | Buyer | Name and address on tax invoices, VAT number format, ID when there is no VAT number, ID scheme, Saudi address fields (BR-KSA-10/14/42/44/63/67/81) |
 | Notes | Billing reference for credit/debit notes, reason warning (BR-KSA-56, BR-55, BR-KSA-17) |
 | Payment | Payment means codes 10, 30, 42, 48, 1 (BR-KSA-16) |
-| Lines | At least one line, item names, no negative values, standard rate above 0%, national ID for education/healthcare exemptions (BR-16, BR-25, BR-KSA-F-04, BR-KSA-DEC-02, BR-KSA-25/49) |
+| Lines | At least one line, item names, no negative values, standard rate of 5 or 15, national ID for education/healthcare exemptions (BR-16, BR-25, BR-KSA-F-04, BR-KSA-DEC-02, BR-KSA-84, BR-KSA-25/49) |
 | Allowances/charges | Non-negative amounts, standard rate above 0% (BR-S-06/07) |
-| Flags & dates | Flag combinations, supply dates, simplified summary requirements, prepayment date/time (BR-KSA-07/31/36/46/71/72, BR-KSA-F-05) |
+| Flags & dates | Flag combinations, supply dates, simplified summary requirements, prepayment date/time and exemption reason (BR-KSA-07/31/36/46/71/72/93, BR-KSA-F-05) |
+| Identifiers | Format per scheme and placeholder values, reported as warnings like ZATCA does (BR-KSA-F-07 to F-13) |
+| Lengths | Character limits of names, addresses, references, notes and item fields, as warnings (BR-KSA-F-06) |
 
-Character limits (BR-KSA-F-06) come from ZATCA's separate Data Dictionary and are not checked.
+The rule-by-rule table, including what is left to ZATCA, is in [docs/COMPLIANCE.md](docs/COMPLIANCE.md).
 
 ---
 
@@ -679,6 +704,54 @@ try {
 
 All exceptions extend `ZatcaException` and provide a `getContext()` method with structured error details.
 
+### Handling every ZATCA outcome
+
+ZATCA expresses several outcomes only through the HTTP status code. `report()`, `clear()` and `checkCompliance()` return a `SubmissionResult` for all of them instead of throwing, which is what you need if you store invoices and retry:
+
+```php
+use KhaledHajSalem\Zatca\Exceptions\ZatcaApiException;
+use KhaledHajSalem\Zatca\Services\ZatcaAPIService;
+
+$api = new ZatcaAPIService('production', null, ['timeout' => 30, 'connect_timeout' => 10]);
+
+try {
+    $result = $api->clear($certificate, $secret, $signedXml, $invoiceHash, $uuid);
+} catch (ZatcaApiException $e) {
+    // No response at all (timeout, DNS, TLS). The outcome is UNKNOWN, not a
+    // rejection: send the SAME signed document again later.
+}
+
+if ($result->isAccepted()) {
+    $xmlForTheBuyer = $result->getClearedInvoice();   // carries ZATCA's stamp
+    $warnings = $result->getWarnings();
+    $wasAlreadySubmitted = $result->isDuplicate();    // 208 / 409
+} elseif ($result->isRejected()) {
+    $errors = $result->getErrors();                   // fix and issue a NEW document
+} elseif ($result->shouldRetry()) {
+    // 413, 429 or 5xx: ZATCA did not receive it. Send the same document again.
+}
+```
+
+| Status | `getOutcome()` | Meaning |
+|--------|----------------|---------|
+| 200 | `accepted` | Reported or cleared |
+| 202 | `accepted_with_warnings` | Accepted; read `getWarnings()` |
+| 208 / 409 | `already_accepted` | The same document was submitted before. On reporting the body still says `NOT_REPORTED`; do not treat it as a rejection |
+| 400 | `rejected` | Validation errors |
+| 303 | `clearance_disabled` | Clearance is deactivated; report the document instead |
+| 401 | `unauthorized` | Certificate or secret rejected |
+| 413, 429, 5xx | `not_received` | Retry with the same document |
+
+Never re-generate or re-sign a document because a request failed: a rejected or lost document still occupies its counter value (ICV) and its hash is the previous-invoice hash of the next one.
+
+The array-returning methods (`reportInvoice()`, `clearInvoice()`, `validateInvoiceCompliance()`) behave as before: 200, 202 and 400 return the body, anything else throws. `getLastStatusCode()` tells 200 from 202.
+
+To supply your own Guzzle client (proxy, middleware, a mock handler in tests):
+
+```php
+$api = new ZatcaAPIService('sandbox', new \GuzzleHttp\Client(['handler' => $stack]));
+```
+
 ---
 
 ## Package Structure
@@ -698,7 +771,8 @@ zatca-php/
 │   │   ├── ZatcaValidationException.php # Thrown by processInvoice() with 'validate' => true
 │   │   └── ZatcaStorageException.php
 │   ├── Services/                      # External services
-│   │   ├── ZatcaAPIService.php        # ZATCA API client (clearance, reporting, compliance)
+│   │   ├── ZatcaAPIService.php        # ZATCA API client (onboarding, renewal, clearance, reporting)
+│   │   ├── SubmissionResult.php       # Outcome of a submission, with the HTTP status
 │   │   └── Storage.php                # File storage helper
 │   ├── Validation/
 │   │   └── InvoiceValidator.php       # Business-rule checks before submission
@@ -710,6 +784,7 @@ zatca-php/
 │   │   ├── InvoiceSigner.php          # Signs XML, generates QR & hash
 │   │   ├── QRCodeGenerator.php        # TLV-encoded QR code generation
 │   │   ├── Money.php                  # Half-up rounding & decimal formatting
+│   │   ├── AllowanceCharge.php        # Shared allowance/charge rules
 │   │   ├── TaxCategory.php            # VAT categories (S/Z/E/O) & exemption reason codes
 │   │   └── QRCodeTags/               # Individual QR code tag classes
 │   ├── ZatcaInvoice.php               # UBL 2.1 XML generator
@@ -720,9 +795,13 @@ zatca-php/
 │   └── invoice-types.php              # Standard, simplified, credit, debit, prepayment
 ├── docs/
 │   ├── API.md                         # Detailed API reference
+│   ├── COMPLIANCE.md                  # ZATCA rule coverage, verified against the sandbox
 │   └── allowances-and-buyer.md        # Line discounts (BG-27) & B2B/B2C buyer party
 ├── tests/
-│   └── ZatcaInvoiceTest.php
+│   ├── Fixtures/Scenarios.php         # 63 documents: every type, flag and feature
+│   ├── ScenarioMatrixTest.php         # Offline checks on every scenario
+│   ├── Sandbox/                       # Opt-in: the same scenarios against ZATCA
+│   └── ...
 ├── composer.json
 └── README.md
 ```
@@ -732,12 +811,15 @@ zatca-php/
 ## Testing
 
 ```bash
-composer test              # Run tests
+composer test              # Run the offline tests
+composer test-sandbox      # Validate every scenario against ZATCA's developer portal
 composer test-coverage     # Run with coverage
 composer phpstan           # Static analysis
 composer cs-check          # Code style check
 composer cs-fix            # Fix code style
 ```
+
+`composer test-sandbox` needs network access. It onboards a throwaway unit with the sandbox's fixed OTP, signs the 63 documents in `tests/Fixtures/Scenarios.php` and requires ZATCA's validator to return `PASS` with no warnings for each. Run it before a release, and whenever ZATCA publishes a new SDK version. It uses ZATCA's dummy taxpayer and writes no files.
 
 ---
 

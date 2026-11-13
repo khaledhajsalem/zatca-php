@@ -2,8 +2,13 @@
 
 namespace KhaledHajSalem\Zatca\Support;
 
+use KhaledHajSalem\Zatca\Exceptions\ZatcaException;
+
 class InvoiceSigner
 {
+    /** Longest QR code (base64 characters) ZATCA accepts (BR-CL-KSA-14). */
+    public const MAX_QR_LENGTH = 1000;
+
     private $signedInvoice;  // Signed invoice XML string
     private $hash;           // Invoice hash (base64 encoded)
     private $qrCode;         // QR Code (base64 encoded)
@@ -55,6 +60,17 @@ class InvoiceSigner
         )->encodeBase64();
 
 
+        // ZATCA rejects a QR code longer than 1000 base64 characters
+        // (BR-CL-KSA-14). The seller name is the only variable-length part,
+        // so an over-long name is the cause.
+        if (strlen($instance->qrCode) > self::MAX_QR_LENGTH) {
+            throw new ZatcaException(
+                'The QR code is ' . strlen($instance->qrCode) . ' characters; ZATCA accepts at most '
+                . self::MAX_QR_LENGTH . ' (BR-CL-KSA-14). Shorten the seller registration name.',
+                ['qr_length' => strlen($instance->qrCode)]
+            );
+        }
+
         // Insert UBL Extension and QR Code into the XML
         $signedInvoice = str_replace(
             [
@@ -70,6 +86,20 @@ class InvoiceSigner
 
         // Remove extra blank lines and save
         $instance->signedInvoice = preg_replace('/^[ \t]*[\r\n]+/m', '', $signedInvoice);
+
+        // ZATCA recomputes the hash from the document it receives. If the
+        // layout of the final XML made that differ from the hash that was
+        // signed, the document would be rejected (invalid-invoice-hash)
+        // after its ICV had been consumed. Fail here instead.
+        $recomputed = InvoiceExtension::fromString($instance->signedInvoice)->computeXmlDigest();
+        if ($recomputed !== $instance->hash) {
+            throw new ZatcaException(
+                'The signed invoice does not hash to the value that was signed. '
+                . 'The unsigned XML has an element between the QR reference and cac:Signature, '
+                . 'or was not produced by ZatcaInvoice::generateXml().',
+                ['signed_hash' => $instance->hash, 'recomputed_hash' => $recomputed]
+            );
+        }
 
         return $instance;
     }

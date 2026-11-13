@@ -20,6 +20,11 @@ class BuyerData
     protected string $buildingNumber = '';
     protected string $plotIdentification = '';
     protected string $citySubdivisionName = '';
+    protected string $companyLegalForm = '';
+    protected string $contactName = '';
+    protected string $contactTelephone = '';
+    protected string $contactEmail = '';
+    protected string $contactNote = '';
 
     public function setRegistrationName(string $registrationName): self
     {
@@ -166,4 +171,58 @@ class BuyerData
     {
         return $this->citySubdivisionName;
     }
-} 
+
+    /**
+     * Company legal form of the buyer (KSA-40,
+     * cac:PartyLegalEntity/cbc:CompanyLegalForm). Optional.
+     */
+    public function setCompanyLegalForm(string $companyLegalForm): self
+    {
+        $this->companyLegalForm = $companyLegalForm;
+        return $this;
+    }
+
+    public function getCompanyLegalForm(): string
+    {
+        return $this->companyLegalForm;
+    }
+
+    /**
+     * Buyer contact details (cac:Contact). All optional; ZATCA accepts
+     * several e-mail addresses separated by ";".
+     */
+    public function setContact(string $name = '', string $telephone = '', string $email = '', string $note = ''): self
+    {
+        $this->contactName = $name;
+        $this->contactTelephone = $telephone;
+        $this->contactEmail = $email;
+        $this->contactNote = $note;
+        return $this;
+    }
+
+    public function getContactName(): string
+    {
+        return $this->contactName;
+    }
+
+    public function getContactTelephone(): string
+    {
+        return $this->contactTelephone;
+    }
+
+    public function getContactEmail(): string
+    {
+        return $this->contactEmail;
+    }
+
+    public function getContactNote(): string
+    {
+        return $this->contactNote;
+    }
+
+    public function hasContact(): bool
+    {
+        return $this->contactName !== '' || $this->contactTelephone !== ''
+            || $this->contactEmail !== '' || $this->contactNote !== '';
+    }
+}

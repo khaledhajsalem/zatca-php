@@ -5,6 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-13
+
+Brings the package up to the rules ZATCA validates today (SDK 3.4.8). The
+published XML Implementation Standard (v1.2, May 2023) is no longer the whole
+picture: ZATCA has added and amended rules through SDK releases since. See
+[docs/COMPLIANCE.md](docs/COMPLIANCE.md) for the full coverage table.
+
+Every document type and feature is now checked against ZATCA's own validator:
+`composer test-sandbox` submits 63 scenarios to the developer portal and
+requires each to pass with no warnings.
+
+### Fixed
+- **Invalid invoice hash with document references.** An invoice with
+  `addDocumentReference()` was rejected by ZATCA (`invalid-invoice-hash`):
+  the reference was written between the QR reference and `cac:Signature`, so
+  the document ZATCA hashed differed from the one that was signed. References
+  are now written before the QR reference.
+- **BR-CO-17 warning on out-of-scope supplies.** `O` lines now carry an
+  explicit `0.00` rate; without it ZATCA warned on every such invoice.
+- **Memory growth in long-running processes.** `InvoiceExtension` kept every
+  XML element wrapper in a static registry that was never emptied, so queue
+  workers and Octane accumulated every signed document.
+- `InvoiceExtension::computeXmlDigest()` no longer removes the signature and
+  QR blocks from the document it is called on.
+- A 303 answer from the clearance API (clearance deactivated) is no longer
+  followed as a redirect.
+- Error responses that are not JSON (for example the plain-text 406) no longer
+  hide the HTTP status behind a JSON parse error.
+
+### Added
+- **Guzzle 8 support** (`guzzlehttp/guzzle: ^7.0|^8.0`). Fresh Laravel 13
+  applications ship Guzzle 8 and could not install 1.1.0 without downgrading.
+- **`SubmissionResult`** and the methods `report()`, `clear()` and
+  `checkCompliance()` on `ZatcaAPIService`. They return every HTTP outcome
+  with its status code instead of throwing: accepted, accepted with warnings,
+  already accepted (208 on clearance, 409 on reporting), rejected, clearance
+  deactivated (303), unauthorized, and not received (413, 429, 5xx).
+- **`renewProductionCertificate()`** (`PATCH /production/csids`).
+- **Injectable HTTP client and options:**
+  `new ZatcaAPIService($environment, $client, ['timeout' => …, 'connect_timeout' => …, 'verify' => …, 'language' => 'ar'])`.
+  `getLastStatusCode()` exposes the status behind the array-returning methods.
+- **`CertificateBuilder::getPrivateKey()`** returns the key as a string, so it
+  never has to be written to disk.
+- **Hash self-check in `InvoiceSigner`:** signing throws `ZatcaException` if
+  the signed document would not hash to the signed value, instead of letting
+  ZATCA reject it after its counter value has been used.
+- **QR length check (BR-CL-KSA-14):** signing throws if the QR code exceeds
+  1000 characters, which ZATCA rejects.
+- **Simplified exports** (`simplified()->export()`), allowed by ZATCA since
+  SDK 3.4.6.
+- **Exemption reason codes** `VATEX-SA-DUTYFREE`, `VATEX-SA-ROYALDECREE` and
+  `VATEX-SA-32(bis)` (zero rated). `TaxCategory::reasons()` lists the codes
+  of a category.
+- **Prepayment exemption reason** (KSA-41/42): `tax_exemption_reason_code`
+  and `tax_exemption_reason` keys on `addPrepayment()`.
+- **Exchange rate block:** `cac:TaxExchangeRate` is written for
+  foreign-currency invoices.
+- **Several allowances and charges per line**, with optional percentage and
+  base amount: `InvoiceLineData::addAllowance()` / `addCharge()`,
+  `getTotalAllowanceAmount()`, `getTotalChargeAmount()`.
+- **New invoice fields:** `setPurchaseOrderReference()` (BT-13),
+  `setContractReference()` (BT-12), `setTaxPointDate()` (BT-7), `issue_date`
+  on billing references, `account_id` (BT-84) and `payment_terms` (KSA-22) on
+  payment means.
+- **Buyer contact and legal form:** `BuyerData::setContact()` and
+  `setCompanyLegalForm()` (KSA-40).
+- **Validation rules:** BR-KSA-05 (invoice type code), BR-KSA-84 (standard
+  rate must be 5 or 15, an error at ZATCA), BR-KSA-93, BR-KSA-97, BR-KSA-98
+  (24-hour reporting window), BR-KSA-F-06 (character limits), BR-KSA-F-07 to
+  F-11 (identifier formats per scheme) and BR-KSA-F-13 (placeholder
+  identifiers). Severities match ZATCA's.
+- Tests: 387 offline tests (was 88), covering the API client, signing and
+  the certificate builder for the first time, plus the opt-in sandbox suite.
+
+### Changed
+- `TaxCategory::hasPercent()` now returns `true` for every category.
+- `reportInvoice()` sends `Clearance-Status: 0`, which the API specification
+  lists as required.
+- `ComplianceCertificateResult` and `ProductionCertificateResult` moved to
+  their own files (same namespace).
+- The reporting methods of `InvoiceValidator` now return warnings where they
+  returned nothing: an invoice that validated cleanly under 1.1.0 can show
+  BR-KSA-F-06, F-07 to F-13, BR-KSA-93, 97 or 98 warnings. Warnings never
+  block `ZatcaManager::processInvoice()`.
+
+### Upgrade notes
+- A standard-rated line with a rate other than 5 or 15 is now a validation
+  **error** (BR-KSA-84). ZATCA already rejected such invoices.
+- An invoice type code outside 388, 383, 381, 386 is now a validation error.
+- Signing can now throw `ZatcaException` (hash self-check, QR length). Both
+  cases were rejections at ZATCA before.
+
 ## [1.1.0] - 2026-09-28
 
 ### Added

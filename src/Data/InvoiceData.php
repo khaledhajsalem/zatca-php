@@ -3,6 +3,7 @@
 namespace KhaledHajSalem\Zatca\Data;
 
 use InvalidArgumentException;
+use KhaledHajSalem\Zatca\Support\AllowanceCharge;
 use KhaledHajSalem\Zatca\Support\Money;
 use KhaledHajSalem\Zatca\Support\TaxCategory;
 use KhaledHajSalem\Zatca\Validation\InvoiceValidator;
@@ -52,6 +53,9 @@ class InvoiceData
     protected string $supplyEndDate = '';
     protected float $payableRoundingAmount = 0.0;
     protected array $prepayments = [];
+    protected string $purchaseOrderId = '';
+    protected string $contractId = '';
+    protected string $taxPointDate = '';
 
     public function setInvoiceNumber(string $invoiceNumber): self
     {
@@ -229,7 +233,8 @@ class InvoiceData
     /**
      * Rate to convert the invoice currency into the tax currency (SAR),
      * i.e. 1 unit of DocumentCurrencyCode = $rate TaxCurrencyCode.
-     * Required when the invoice currency is not the tax currency.
+     * Required when the invoice currency is not the tax currency; it is
+     * also written to the XML as cac:TaxExchangeRate.
      */
     public function setTaxExchangeRate(float $rate): self
     {
@@ -257,12 +262,59 @@ class InvoiceData
     }
 
     /**
+     * Purchase order reference issued by the buyer (BT-13,
+     * cac:OrderReference/cbc:ID). Optional, up to 127 characters.
+     */
+    public function setPurchaseOrderReference(string $purchaseOrderId): self
+    {
+        $this->purchaseOrderId = $purchaseOrderId;
+        return $this;
+    }
+
+    public function getPurchaseOrderReference(): string
+    {
+        return $this->purchaseOrderId;
+    }
+
+    /**
+     * Contract reference (BT-12, cac:ContractDocumentReference/cbc:ID).
+     * Optional, up to 127 characters.
+     */
+    public function setContractReference(string $contractId): self
+    {
+        $this->contractId = $contractId;
+        return $this;
+    }
+
+    public function getContractReference(): string
+    {
+        return $this->contractId;
+    }
+
+    /**
+     * VAT point date (BT-7, cbc:TaxPointDate), format YYYY-MM-DD. Optional.
+     */
+    public function setTaxPointDate(string $taxPointDate): self
+    {
+        $this->taxPointDate = $taxPointDate;
+        return $this;
+    }
+
+    public function getTaxPointDate(): string
+    {
+        return $this->taxPointDate;
+    }
+
+    /**
      * Deduct a prepayment invoice from this invoice (§9.5, BR-KSA-73 to 80).
      * Each prepayment becomes an additional zero-value invoice line.
      *
      * Keys: id (invoice number of the 386 prepayment invoice), issue_date,
      * issue_time, taxable_amount, tax_category (default S), tax_percent
-     * (default 15 for S, 0 otherwise), tax_amount (computed when omitted).
+     * (default 15 for S, 0 otherwise), tax_amount (computed when omitted),
+     * tax_exemption_reason_code (KSA-41) and tax_exemption_reason (KSA-42)
+     * for Z, E and O prepayments. ZATCA warns when a zero-rated prepayment
+     * has no reason code (BR-KSA-93); the text defaults to ZATCA's wording.
      *
      * @throws InvalidArgumentException For missing or inconsistent values.
      */
@@ -292,6 +344,18 @@ class InvoiceData
             );
         }
 
+        // Exemption reason of the prepayment (KSA-41 / KSA-42). Optional, but
+        // when a code is given it must belong to the category.
+        $reasonCode = null;
+        $reasonText = null;
+        if (($prepayment['tax_exemption_reason_code'] ?? '') !== '') {
+            [$reasonCode, $reasonText] = TaxCategory::resolve(
+                $category,
+                (string)$prepayment['tax_exemption_reason_code'],
+                ($prepayment['tax_exemption_reason'] ?? '') !== '' ? (string)$prepayment['tax_exemption_reason'] : null
+            );
+        }
+
         $this->prepayments[] = [
             'id'             => (string)$prepayment['id'],
             'issue_date'     => (string)$prepayment['issue_date'],
@@ -300,6 +364,8 @@ class InvoiceData
             'tax_percent'    => $percent,
             'taxable_amount' => $taxable,
             'tax_amount'     => $expectedTax,
+            'tax_exemption_reason_code' => $reasonCode,
+            'tax_exemption_reason'      => $reasonText,
         ];
 
         return $this;
@@ -409,7 +475,11 @@ class InvoiceData
         return $this->setTransactionFlag(3, $enabled);
     }
 
-    /** KSA-2 position 5: export to a foreign buyer. Tax invoices only (BR-KSA-31). */
+    /**
+     * KSA-2 position 5: export to a foreign buyer. Allowed on tax invoices
+     * and, since ZATCA SDK 3.4.6 (amended BR-KSA-31), on simplified
+     * invoices too (B2C exports).
+     */
     public function export(bool $enabled = true): self
     {
         return $this->setTransactionFlag(4, $enabled);
@@ -750,39 +820,7 @@ class InvoiceData
      */
     private function normalizeAllowanceCharge(array $allowanceCharge): array
     {
-        $hasBase = isset($allowanceCharge['base_amount']);
-        $hasMultiplier = isset($allowanceCharge['multiplier']);
-
-        if ($hasBase !== $hasMultiplier) {
-            throw new InvalidArgumentException(
-                "Allowance/charge 'base_amount' and 'multiplier' must be provided together (BR-KSA-EN16931-04/05)."
-            );
-        }
-
-        if ($hasBase) {
-            $multiplier = (float)$allowanceCharge['multiplier'];
-
-            if ($multiplier < 0 || $multiplier > 100 || Money::round($multiplier) !== $multiplier) {
-                throw new InvalidArgumentException(
-                    "Allowance/charge 'multiplier' must be a percentage from 0 to 100 with at most two decimals (BR-KSA-DEC-01)."
-                );
-            }
-
-            $allowanceCharge['base_amount'] = Money::round((float)$allowanceCharge['base_amount']);
-            $expected = Money::round($allowanceCharge['base_amount'] * $multiplier / 100);
-
-            if (!isset($allowanceCharge['amount'])) {
-                $allowanceCharge['amount'] = $expected;
-            } elseif (Money::round((float)$allowanceCharge['amount']) !== $expected) {
-                throw new InvalidArgumentException(
-                    "Allowance/charge 'amount' must equal base_amount × multiplier / 100 ($expected) (BR-KSA-EN16931-03)."
-                );
-            }
-        }
-
-        $allowanceCharge['amount'] = Money::round((float)($allowanceCharge['amount'] ?? 0.0));
-
-        return $allowanceCharge;
+        return AllowanceCharge::normalize($allowanceCharge);
     }
 
     /**

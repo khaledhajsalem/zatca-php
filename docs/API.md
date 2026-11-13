@@ -550,3 +550,85 @@ try {
 | `production` | `https://gw-fatoora.zatca.gov.sa/e-invoicing/core` | Live invoices |
 
 API version: **V2**
+
+---
+
+## Added in 1.2.0
+
+### ZatcaAPIService
+
+```php
+new ZatcaAPIService(string $environment = 'sandbox', ?\GuzzleHttp\ClientInterface $httpClient = null, array $options = [])
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `timeout` | `30` | Seconds to wait for a response (ignored when you pass a client) |
+| `connect_timeout` | `10` | Seconds to wait for the connection (ignored when you pass a client) |
+| `verify` | `true` | TLS certificate verification (ignored when you pass a client) |
+| `language` | `en` | Language of ZATCA's messages: `en` or `ar` |
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `report($certificate, $secret, $signedXml, $hash, $uuid)` | `SubmissionResult` | Report a simplified document. Never throws for an HTTP status |
+| `clear($certificate, $secret, $signedXml, $hash, $uuid)` | `SubmissionResult` | Clear a standard document |
+| `checkCompliance($certificate, $secret, $signedXml, $hash, $uuid)` | `SubmissionResult` | Compliance check with the compliance CSID |
+| `renewProductionCertificate($certificate, $secret, $csr, $otp)` | `ProductionCertificateResult` | Renew a production CSID. Throws `ZatcaApiException` with `status_code` 428 when the compliance checks must be passed again |
+| `getLastStatusCode()` | `?int` | HTTP status of the last response, `null` when none was received |
+
+### SubmissionResult
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getStatusCode()` | `int` | HTTP status |
+| `getOutcome()` | `string` | `accepted`, `accepted_with_warnings`, `already_accepted`, `rejected`, `clearance_disabled`, `unauthorized`, `not_received`, `unexpected` |
+| `isAccepted()` | `bool` | ZATCA holds the document (now or from an earlier attempt) |
+| `isRejected()` | `bool` | Validation errors; sending again will not help |
+| `isDuplicate()` | `bool` | 208 on clearance, 409 on reporting |
+| `shouldRetry()` | `bool` | Not received (413, 429, 5xx): send the same document again |
+| `getErrors()` / `getWarnings()` / `getInfoMessages()` | `array` | ZATCA's validation messages |
+| `getClearedInvoice()` | `?string` | Cleared XML with ZATCA's stamp (clearance) |
+| `getReportingStatus()` / `getClearanceStatus()` | `?string` | As returned by ZATCA |
+| `getBody()` | `array` | Decoded response body |
+
+### CertificateBuilder
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getPrivateKey()` | `string` | The generated private key as PEM, without writing a file |
+
+### InvoiceData
+
+| Method | Description |
+|--------|-------------|
+| `setPurchaseOrderReference($id)` | BT-13 |
+| `setContractReference($id)` | BT-12 |
+| `setTaxPointDate($date)` | BT-7 |
+| `addPrepayment([... 'tax_exemption_reason_code' => ..., 'tax_exemption_reason' => ...])` | KSA-41 / KSA-42 |
+| `addBillingReference([... 'issue_date' => ...])` | Issue date of the referenced invoice |
+| `addPaymentMeans([... 'account_id' => ..., 'payment_terms' => ...])` | BT-84 / KSA-22 |
+
+### InvoiceLineData
+
+| Method | Description |
+|--------|-------------|
+| `addAllowance(array $allowance)` | Further line allowance: `amount`, `reason`, `reason_code`, `base_amount` + `multiplier` |
+| `addCharge(array $charge)` | Further line charge; `reason` and `reason_code` required |
+| `getAllowances()` / `getCharges()` | All allowances / charges of the line |
+| `getTotalAllowanceAmount()` / `getTotalChargeAmount()` | Their sums |
+
+### BuyerData
+
+| Method | Description |
+|--------|-------------|
+| `setContact($name, $telephone, $email, $note)` | `cac:Contact` |
+| `setCompanyLegalForm($form)` | KSA-40 |
+
+### TaxCategory
+
+| Member | Description |
+|--------|-------------|
+| `STANDARD_RATES` | `[5.0, 15.0]` (BR-KSA-84) |
+| `isStandardRate(float $percent)` | Whether ZATCA accepts the rate for category `S` |
+| `reasons(string $category)` | Exemption reason codes of a category with ZATCA's text |
+

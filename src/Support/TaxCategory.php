@@ -34,6 +34,8 @@ class TaxCategory
         ],
         self::ZERO_RATED => [
             'VATEX-SA-32'    => 'Export of goods',
+            // Added by ZATCA SDK 3.4.2.
+            'VATEX-SA-32(bis)' => 'Supply under Customs Suspension Arrangement',
             'VATEX-SA-33'    => 'Export of services',
             'VATEX-SA-34-1'  => 'The international transport of Goods',
             'VATEX-SA-34-2'  => 'international transport of passengers',
@@ -45,6 +47,10 @@ class TaxCategory
             'VATEX-SA-EDU'   => 'Private education to citizen',
             'VATEX-SA-HEA'   => 'Private healthcare to citizen',
             'VATEX-SA-MLTRY' => 'supply of qualified military goods',
+            // Added by ZATCA SDK 3.3.4.
+            'VATEX-SA-DUTYFREE' => 'Qualified Supply of Goods in Duty Free area',
+            // Added by ZATCA SDK 3.4.2.
+            'VATEX-SA-ROYALDECREE' => 'Supply on which the Government bears the VAT',
         ],
         self::OUT_OF_SCOPE => [
             'VATEX-SA-OOS' => null,
@@ -68,12 +74,42 @@ class TaxCategory
     }
 
     /**
+     * VAT rates ZATCA accepts for the standard-rated category (BR-KSA-84).
+     * Any other rate is rejected with an error.
+     */
+    public const STANDARD_RATES = [5.0, 15.0];
+
+    /**
      * Whether a VAT rate (cbc:Percent) is emitted for the category.
-     * Out-of-scope supplies carry no rate (BR-O-05, BR-O-09).
+     *
+     * Always true since 1.2.0. Out-of-scope supplies used to omit the rate
+     * (BR-O-05), but ZATCA replaced that rule with "the rate shall be 0 if it
+     * exists" (BR-KSA-11/12/13) and its validator raises a BR-CO-17 warning
+     * when the VAT breakdown of an "O" category has no rate. Verified against
+     * the sandbox: "O" with 0.00 passes without warnings.
      */
     public static function hasPercent(string $category): bool
     {
-        return $category !== self::OUT_OF_SCOPE;
+        return true;
+    }
+
+    /**
+     * Whether the rate is one ZATCA accepts for a standard-rated supply.
+     */
+    public static function isStandardRate(float $percent): bool
+    {
+        return in_array($percent, self::STANDARD_RATES, true);
+    }
+
+    /**
+     * Exemption reason codes allowed for a category, with ZATCA's reason
+     * text (null where ZATCA expects free text). Empty for "S".
+     *
+     * @return array<string, ?string>
+     */
+    public static function reasons(string $category): array
+    {
+        return self::REASONS[$category] ?? [];
     }
 
     /**

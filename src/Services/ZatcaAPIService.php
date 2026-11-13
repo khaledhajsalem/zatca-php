@@ -3,8 +3,8 @@
 namespace KhaledHajSalem\Zatca\Services;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\Exception\RequestException;
 use KhaledHajSalem\Zatca\Exceptions\ZatcaApiException;
 use InvalidArgumentException;
 
@@ -19,11 +19,13 @@ class ZatcaAPIService
     private const API_VERSION = 'V2';
     private const SUCCESS_STATUS_CODES = [200, 202];
 
-    private Client $httpClient;
+    private ClientInterface $httpClient;
     private bool $allowWarnings = true;
     private string $environment;
     private string $logChannel = 'zatca';
     private bool $debug = false;
+    private string $language = 'en';
+    private ?int $lastStatusCode = null;
 
     public function getLogChannel(): string
     {
@@ -34,9 +36,16 @@ class ZatcaAPIService
      * Create a new ZatcaService instance.
      *
      * @param string $environment API environment (sandbox|simulation|production)
+     * @param ClientInterface|null $httpClient Your own Guzzle client (7 or 8),
+     *        for example to add a proxy, middleware or a mock handler in
+     *        tests. It must not throw on 4xx/5xx ("http_errors" => false).
+     * @param array $options Used when no client is given: "timeout" (seconds,
+     *        default 30), "connect_timeout" (default 10), "verify" (TLS
+     *        verification, default true). Always: "language" ("en" or "ar")
+     *        for the messages ZATCA returns.
      * @throws InvalidArgumentException For invalid environment.
      */
-    public function __construct(string $environment = 'sandbox')
+    public function __construct(string $environment = 'sandbox', ?ClientInterface $httpClient = null, array $options = [])
     {
         if (!isset(self::ENVIRONMENTS[$environment])) {
             $validEnvs = implode(', ', array_keys(self::ENVIRONMENTS));
@@ -44,12 +53,24 @@ class ZatcaAPIService
         }
 
         $this->environment = $environment;
-        $this->httpClient = new Client([
+        $this->language = in_array($options['language'] ?? 'en', ['en', 'ar'], true) ? ($options['language'] ?? 'en') : 'en';
+        $this->httpClient = $httpClient ?? new Client([
             'base_uri' => $this->getBaseUri(),
-            'timeout'  => 30,
-            'verify'   => true,
+            'timeout'  => $options['timeout'] ?? 30,
+            'connect_timeout' => $options['connect_timeout'] ?? 10,
+            'verify'   => $options['verify'] ?? true,
             'http_errors' => false, // Don't throw exceptions for 4xx/5xx status codes
         ]);
+    }
+
+    /**
+     * HTTP status code of the most recent response, or null when the last
+     * call received no response (timeout, DNS, TLS) or none was made yet.
+     * Lets callers of the array-returning methods tell 200 from 202.
+     */
+    public function getLastStatusCode(): ?int
+    {
+        return $this->lastStatusCode;
     }
 
     /**
@@ -129,7 +150,7 @@ class ZatcaAPIService
         return $this->sendRequest(
             'POST',
             '/compliance/invoices',
-            ['Accept-Language' => 'en', 'Content-Type' => 'application/json'],
+            ['Accept-Language' => $this->language, 'Content-Type' => 'application/json'],
             [
                 'invoiceHash' => $invoiceHash,
                 'uuid'        => $uuid,
@@ -194,7 +215,7 @@ class ZatcaAPIService
             $response = $this->sendRequest(
                 'POST',
                 '/invoices/clearance/single',
-                ['Clearance-Status' => '1', 'Accept-Language' => 'en'],
+                ['Clearance-Status' => '1', 'Accept-Language' => $this->language],
                 [
                     'invoiceHash' => $invoiceHash,
                     'uuid'        => $uuid,
@@ -231,7 +252,7 @@ class ZatcaAPIService
             $response = $this->sendRequest(
                 'POST',
                 '/invoices/reporting/single',
-                ['Accept-Language' => 'en'],
+                ['Clearance-Status' => '0', 'Accept-Language' => $this->language],
                 [
                     'invoiceHash' => $invoiceHash,
                     'uuid'        => $uuid,
@@ -247,6 +268,140 @@ class ZatcaAPIService
     }
 
 
+
+    /**
+     * Report a simplified document and get every HTTP outcome back as a
+     * SubmissionResult, including 409 (already reported), 400 (rejected),
+     * 401 and 5xx, instead of an exception.
+     *
+     * @throws ZatcaApiException Only when no response was received at all
+     *         (timeout, DNS, TLS). The outcome is then unknown and the same
+     *         document may be sent again.
+     */
+    public function report(
+        string $certificate,
+        string $secret,
+        string $signedInvoice,
+        string $invoiceHash,
+        string $uuid
+    ): SubmissionResult {
+        [$status, $body] = $this->dispatch(
+            'POST',
+            '/invoices/reporting/single',
+            ['Clearance-Status' => '0', 'Accept-Language' => $this->language],
+            $this->invoicePayload($signedInvoice, $invoiceHash, $uuid),
+            $this->createAuthHeaders($certificate, $secret)
+        );
+
+        return new SubmissionResult('reporting', $status, $body);
+    }
+
+    /**
+     * Clear a standard document and get every HTTP outcome back as a
+     * SubmissionResult, including 208 (hash already submitted; the cleared
+     * invoice is returned again) and 303 (clearance deactivated).
+     *
+     * @throws ZatcaApiException Only when no response was received at all.
+     */
+    public function clear(
+        string $certificate,
+        string $secret,
+        string $signedInvoice,
+        string $invoiceHash,
+        string $uuid
+    ): SubmissionResult {
+        [$status, $body] = $this->dispatch(
+            'POST',
+            '/invoices/clearance/single',
+            ['Clearance-Status' => '1', 'Accept-Language' => $this->language],
+            $this->invoicePayload($signedInvoice, $invoiceHash, $uuid),
+            $this->createAuthHeaders($certificate, $secret)
+        );
+
+        return new SubmissionResult('clearance', $status, $body);
+    }
+
+    /**
+     * Run a compliance check with the compliance CSID and get every HTTP
+     * outcome back as a SubmissionResult.
+     *
+     * @throws ZatcaApiException Only when no response was received at all.
+     */
+    public function checkCompliance(
+        string $certificate,
+        string $secret,
+        string $signedInvoice,
+        string $invoiceHash,
+        string $uuid
+    ): SubmissionResult {
+        [$status, $body] = $this->dispatch(
+            'POST',
+            '/compliance/invoices',
+            ['Accept-Language' => $this->language, 'Content-Type' => 'application/json'],
+            $this->invoicePayload($signedInvoice, $invoiceHash, $uuid),
+            $this->createAuthHeaders($certificate, $secret)
+        );
+
+        return new SubmissionResult('compliance', $status, $body);
+    }
+
+    /**
+     * Renew a production certificate (PATCH /production/csids).
+     *
+     * Authenticated with the CURRENT production certificate and secret. The
+     * OTP comes from the Fatoora portal of the environment; the CSR is a new
+     * one for the same EGS unit.
+     *
+     * @param string $certificate Current production certificate.
+     * @param string $secret Current production secret.
+     * @param string $csr New CSR content.
+     * @param string $otp One-Time Password.
+     * @throws ZatcaApiException For API errors. ZATCA answers 428 with
+     *         dispositionMessage NOT_COMPLIANT and a compliance certificate
+     *         when the compliance checks must be passed again first; the
+     *         exception context then holds that response.
+     */
+    public function renewProductionCertificate(
+        string $certificate,
+        string $secret,
+        string $csr,
+        string $otp
+    ): ProductionCertificateResult {
+        [$status, $body] = $this->dispatch(
+            'PATCH',
+            '/production/csids',
+            ['OTP' => $otp, 'Accept-Language' => $this->language, 'Content-Type' => 'application/json'],
+            ['csr' => base64_encode($csr)],
+            $this->createAuthHeaders($certificate, $secret)
+        );
+
+        if ($status !== 200) {
+            $message = $status === 428
+                ? 'ZATCA requires the compliance checks to be passed again before renewal (428 NOT_COMPLIANT)'
+                : "ZATCA API returned HTTP $status";
+
+            throw new ZatcaApiException($message, [
+                'endpoint' => $this->getBaseUri() . '/production/csids',
+                'status_code' => $status,
+                'response' => $body,
+            ]);
+        }
+
+        return new ProductionCertificateResult(
+            $this->formatCertificate($body['binarySecurityToken'] ?? ''),
+            $body['secret'] ?? '',
+            (string)($body['requestID'] ?? '')
+        );
+    }
+
+    private function invoicePayload(string $signedInvoice, string $invoiceHash, string $uuid): array
+    {
+        return [
+            'invoiceHash' => $invoiceHash,
+            'uuid'        => $uuid,
+            'invoice'     => base64_encode($signedInvoice),
+        ];
+    }
 
     /**
      * Generate authentication headers for secured endpoints.
@@ -283,7 +438,9 @@ class ZatcaAPIService
     }
 
     /**
-     * Core request handling with Guzzle.
+     * Core request handling with Guzzle, with the legacy success rules:
+     * 200, 202 (when warnings are allowed) and 400 return the decoded body;
+     * every other status throws.
      *
      * @param string $method HTTP method.
      * @param string $endpoint API endpoint.
@@ -300,7 +457,39 @@ class ZatcaAPIService
         array $payload = [],
         array $authHeaders = []
     ): array {
-        $url = $this->getBaseUri().$endpoint;
+        [$statusCode, $responseData, $reasonPhrase] = $this->dispatch($method, $endpoint, $headers, $payload, $authHeaders);
+
+        if (!$this->isSuccessfulResponse($statusCode)) {
+            $errorMessage = $statusCode === 400
+                ? "ZATCA API validation error"
+                : "ZATCA API returned HTTP $statusCode " . $reasonPhrase;
+
+            throw new ZatcaApiException($errorMessage, [
+                'endpoint' => $this->getBaseUri() . $endpoint,
+                'status_code' => $statusCode,
+                'response' => $responseData,
+            ]);
+        }
+
+        return $responseData;
+    }
+
+    /**
+     * Send a request and return what came back, without judging it.
+     *
+     * @return array{0: int, 1: array, 2: string} Status code, decoded body, reason phrase.
+     * @throws ZatcaApiException When no response was received (the context
+     *         has no "status_code") or the body is not valid JSON.
+     */
+    private function dispatch(
+        string $method,
+        string $endpoint,
+        array $headers = [],
+        array $payload = [],
+        array $authHeaders = []
+    ): array {
+        $url = $this->getBaseUri() . $endpoint;
+        $this->lastStatusCode = null;
 
         try {
             $mergedHeaders = array_merge(
@@ -315,6 +504,11 @@ class ZatcaAPIService
             $options = [
                 'headers' => $mergedHeaders,
                 'json'    => $payload,
+                // A client supplied by the caller may be configured to
+                // throw on 4xx/5xx; every status is handled here instead.
+                'http_errors' => false,
+                // 303 is an answer (clearance deactivated), not a redirect.
+                'allow_redirects' => false,
             ];
 
             // Debug: Log the complete request details
@@ -324,26 +518,14 @@ class ZatcaAPIService
 
             $response = $this->httpClient->request($method, $url, $options);
             $statusCode = $response->getStatusCode();
-            
+            $this->lastStatusCode = $statusCode;
+
             // Debug: Log the response details
             if ($this->debug) {
                 $this->debugResponse($response, $statusCode);
             }
 
-            if (!$this->isSuccessfulResponse($statusCode)) {
-                $responseData = $this->parseResponse($response);
-                $errorMessage = $statusCode === 400
-                    ? "ZATCA API validation error"
-                    : "ZATCA API returned HTTP $statusCode " . $response->getReasonPhrase();
-                    
-                throw new ZatcaApiException($errorMessage, [
-                    'endpoint' => $url,
-                    'status_code' => $statusCode,
-                    'response' => $responseData,
-                ]);
-            }
-
-            return $this->parseResponse($response);
+            return [$statusCode, $this->parseResponse($response), $response->getReasonPhrase()];
         } catch (GuzzleException $e) {
             throw new ZatcaApiException('HTTP request failed: ' . $e->getMessage(), [
                 'endpoint' => $url,
@@ -384,6 +566,13 @@ class ZatcaAPIService
         $data = json_decode($content, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
+            // Error responses are not always JSON (406 is plain text, gateways
+            // answer in HTML). Keep the text so the status code still reaches
+            // the caller; only a 2xx with an unreadable body is a failure.
+            if ($response->getStatusCode() >= 300) {
+                return ['message' => trim(substr($content, 0, 2000))];
+            }
+
             $error = json_last_error_msg();
             throw new ZatcaApiException('Failed to parse API response: ' . $error, [
                 'status_code' => $response->getStatusCode(),
@@ -472,69 +661,5 @@ class ZatcaAPIService
         
         // Reset the body stream so it can be read again
         $response->getBody()->rewind();
-    }
-}
-
-/**
- * Data transfer object for compliance certificate results.
- */
-class ComplianceCertificateResult
-{
-    private string $certificate;
-    private string $secret;
-    private string $requestId;
-
-    public function __construct(string $certificate, string $secret, string $requestId)
-    {
-        $this->certificate = $certificate;
-        $this->secret = $secret;
-        $this->requestId = $requestId;
-    }
-
-    public function getCertificate(): string
-    {
-        return $this->certificate;
-    }
-
-    public function getSecret(): string
-    {
-        return $this->secret;
-    }
-
-    public function getRequestId(): string
-    {
-        return $this->requestId;
-    }
-}
-
-/**
- * Data transfer object for production certificate results.
- */
-class ProductionCertificateResult
-{
-    private string $certificate;
-    private string $secret;
-    private string $requestId;
-
-    public function __construct(string $certificate, string $secret, string $requestId)
-    {
-        $this->certificate = $certificate;
-        $this->secret = $secret;
-        $this->requestId = $requestId;
-    }
-
-    public function getCertificate(): string
-    {
-        return $this->certificate;
-    }
-
-    public function getSecret(): string
-    {
-        return $this->secret;
-    }
-
-    public function getRequestId(): string
-    {
-        return $this->requestId;
     }
 }

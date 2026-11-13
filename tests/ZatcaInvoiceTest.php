@@ -645,13 +645,15 @@ class ZatcaInvoiceTest extends TestCase
 
         $this->assertEquals('VATEX-SA-29', $xpath->evaluate("string({$sub}[cac:TaxCategory/cbc:ID='E']/cac:TaxCategory/cbc:TaxExemptionReasonCode)"));
 
-        $this->assertEquals(0, $xpath->evaluate("count({$sub}[cac:TaxCategory/cbc:ID='O']/cac:TaxCategory/cbc:Percent)"));
+        // Out-of-scope carries an explicit 0.00 rate: without it ZATCA
+        // raises a BR-CO-17 warning on the VAT breakdown.
+        $this->assertEquals('0.00', $xpath->evaluate("string({$sub}[cac:TaxCategory/cbc:ID='O']/cac:TaxCategory/cbc:Percent)"));
         $this->assertEquals('Government fee', $xpath->evaluate("string({$sub}[cac:TaxCategory/cbc:ID='O']/cac:TaxCategory/cbc:TaxExemptionReason)"));
 
         // Line-level categories; exemption reasons belong to the breakdown only.
         $this->assertEquals('Z', $xpath->evaluate("string(//cac:InvoiceLine[cbc:ID='2']/cac:Item/cac:ClassifiedTaxCategory/cbc:ID)"));
         $this->assertEquals(0, $xpath->evaluate('count(//cac:ClassifiedTaxCategory/cbc:TaxExemptionReasonCode)'));
-        $this->assertEquals(0, $xpath->evaluate("count(//cac:InvoiceLine[cbc:ID='4']/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent)"));
+        $this->assertEquals('0.00', $xpath->evaluate("string(//cac:InvoiceLine[cbc:ID='4']/cac:Item/cac:ClassifiedTaxCategory/cbc:Percent)"));
     }
 
     /**
@@ -1040,10 +1042,21 @@ class ZatcaInvoiceTest extends TestCase
         (new ZatcaInvoice())->generateXml($invoiceData);
     }
 
-    public function testSimplifiedExportThrows()
+    public function testSimplifiedExportIsAllowed()
     {
+        // BR-KSA-31 was amended in ZATCA SDK 3.4.6 to accept B2C exports.
         $invoiceData = $this->standardInvoice($this->categoryLine(1, 100.00));
         $invoiceData->simplified()->export();
+
+        $xpath = $this->xpath((new ZatcaInvoice())->generateXml($invoiceData));
+
+        $this->assertEquals('0200100', $xpath->evaluate('string(//cbc:InvoiceTypeCode/@name)'));
+    }
+
+    public function testSimplifiedSelfBilledThrows()
+    {
+        $invoiceData = $this->standardInvoice($this->categoryLine(1, 100.00));
+        $invoiceData->simplified()->selfBilled();
 
         $this->expectException(\InvalidArgumentException::class);
         (new ZatcaInvoice())->generateXml($invoiceData);

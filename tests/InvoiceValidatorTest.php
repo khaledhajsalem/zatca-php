@@ -3,6 +3,7 @@
 namespace KhaledHajSalem\Zatca\Tests;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use KhaledHajSalem\Zatca\Data\BuyerData;
 use KhaledHajSalem\Zatca\Data\InvoiceData;
 use KhaledHajSalem\Zatca\Data\InvoiceLineData;
@@ -67,7 +68,9 @@ class InvoiceValidatorTest extends TestCase
     {
         $invoice->calculateTotals();
 
-        return (new InvoiceValidator(new DateTimeImmutable('2024-06-01')))->validate($invoice);
+        // A few hours after the fixture's issue time (2024-01-15 10:30 AST),
+        // so simplified invoices are inside the 24-hour reporting window.
+        return (new InvoiceValidator(new DateTimeImmutable('2024-01-15 18:00:00', new DateTimeZone('Asia/Riyadh'))))->validate($invoice);
     }
 
     private function rules(InvoiceData $invoice): array
@@ -247,7 +250,7 @@ class InvoiceValidatorTest extends TestCase
         $this->assertContains('BR-KSA-49', $rules);
         $this->assertContains('BR-KSA-25', $rules);
 
-        $invoice->setBuyer((new BuyerData())->setRegistrationName('Student')->setPartyIdentification('1000000000')->setPartyIdentificationId('NAT'));
+        $invoice->setBuyer((new BuyerData())->setRegistrationName('Student')->setPartyIdentification('1058529940')->setPartyIdentificationId('NAT'));
         $this->assertSame([], $this->issues($invoice));
     }
 
@@ -271,7 +274,7 @@ class InvoiceValidatorTest extends TestCase
 
     public function testSimplifiedSummaryRules()
     {
-        $invoice = $this->validInvoice()->simplified()->summary()->export();
+        $invoice = $this->validInvoice()->simplified()->summary()->selfBilled();
         $invoice->setBuyer(new BuyerData());
 
         $rules = $this->rules($invoice);
@@ -279,6 +282,15 @@ class InvoiceValidatorTest extends TestCase
         foreach (['BR-KSA-31', 'BR-KSA-71', 'BR-KSA-72'] as $rule) {
             $this->assertContains($rule, $rules);
         }
+    }
+
+    public function testSimplifiedExportIsAllowed()
+    {
+        // BR-KSA-31 was amended in ZATCA SDK 3.4.6 to accept B2C exports.
+        $invoice = $this->validInvoice()->simplified()->export();
+        $invoice->setBuyer(new BuyerData());
+
+        $this->assertNotContains('BR-KSA-31', $this->rules($invoice));
     }
 
     public function testNegativePayableAmount()

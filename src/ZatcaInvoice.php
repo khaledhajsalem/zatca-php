@@ -42,8 +42,14 @@ class ZatcaInvoice
         // Add invoice header information
         $this->addInvoiceHeader($dom, $rootInvoice, $invoiceData, $uuid);
 
+        // Purchase order reference (BT-13)
+        $this->addOrderReference($dom, $rootInvoice, $invoiceData);
+
         // Add billing reference for credit/debit notes
         $this->addBillingReference($dom, $rootInvoice, $invoiceData);
+
+        // Contract reference (BT-12)
+        $this->addContractReference($dom, $rootInvoice, $invoiceData);
 
         // Add document references (ICV, PIH, QR)
         $this->addDocumentReferences($dom, $rootInvoice, $invoiceData);
@@ -64,6 +70,9 @@ class ZatcaInvoice
         // Add document-level allowances and charges
         $this->addDocumentLevelAllowances($dom, $rootInvoice, $invoiceData);
         $this->addDocumentLevelCharges($dom, $rootInvoice, $invoiceData);
+
+        // Exchange rate to the tax currency, directly after the allowances/charges
+        $this->addTaxExchangeRate($dom, $rootInvoice, $invoiceData);
 
         // Add tax information
         $this->addTaxInformation($dom, $rootInvoice, $invoiceData);
@@ -89,9 +98,11 @@ class ZatcaInvoice
             throw new InvalidArgumentException('Export invoices cannot be self-billed (BR-KSA-07).');
         }
 
-        if ($invoiceData->isSimplified() && ($invoiceData->isExport() || $invoiceData->isSelfBilled())) {
+        // Simplified exports (B2C) are accepted since ZATCA SDK 3.4.6; only
+        // self-billing remains excluded for simplified invoices.
+        if ($invoiceData->isSimplified() && $invoiceData->isSelfBilled()) {
             throw new InvalidArgumentException(
-                'Simplified invoices only accept the third-party, nominal and summary flags (BR-KSA-31).'
+                'Simplified invoices cannot be self-billed; they accept the third-party, nominal, export and summary flags (BR-KSA-31).'
             );
         }
 
@@ -179,6 +190,8 @@ class ZatcaInvoice
                 $note->setAttribute('languageID', $invoiceData->getNoteLanguage());
             }
         }
+        // VAT point date (BT-7)
+        $this->appendElementIfNotEmpty($dom, $rootInvoice, 'cbc:TaxPointDate', $invoiceData->getTaxPointDate());
         $this->appendElement($dom, $rootInvoice, 'cbc:DocumentCurrencyCode', $invoiceData->getDocumentCurrencyCode());
         $this->appendElement($dom, $rootInvoice, 'cbc:TaxCurrencyCode', $invoiceData->getTaxCurrencyCode());
         $this->appendElement($dom, $rootInvoice, 'cbc:LineCountNumeric', (string)$invoiceData->getLineCountNumeric());
@@ -194,9 +207,58 @@ class ZatcaInvoice
             $invoiceDocumentReference = $dom->createElement('cac:InvoiceDocumentReference');
             $this->appendElement($dom, $invoiceDocumentReference, 'cbc:ID', $reference['id'] ?? '');
             $this->appendElementIfNotEmpty($dom, $invoiceDocumentReference, 'cbc:UUID', (string)($reference['uuid'] ?? ''));
+            $this->appendElementIfNotEmpty($dom, $invoiceDocumentReference, 'cbc:IssueDate', (string)($reference['issue_date'] ?? ''));
             $billingReference->appendChild($invoiceDocumentReference);
             $rootInvoice->appendChild($billingReference);
         }
+    }
+
+    /**
+     * Add the purchase order reference (BT-13).
+     */
+    protected function addOrderReference(DOMDocument $dom, DOMElement $rootInvoice, InvoiceData $invoiceData): void
+    {
+        if ($invoiceData->getPurchaseOrderReference() === '') {
+            return;
+        }
+
+        $orderReference = $dom->createElement('cac:OrderReference');
+        $this->appendElement($dom, $orderReference, 'cbc:ID', $invoiceData->getPurchaseOrderReference());
+        $rootInvoice->appendChild($orderReference);
+    }
+
+    /**
+     * Add the contract reference (BT-12).
+     */
+    protected function addContractReference(DOMDocument $dom, DOMElement $rootInvoice, InvoiceData $invoiceData): void
+    {
+        if ($invoiceData->getContractReference() === '') {
+            return;
+        }
+
+        $contractReference = $dom->createElement('cac:ContractDocumentReference');
+        $this->appendElement($dom, $contractReference, 'cbc:ID', $invoiceData->getContractReference());
+        $rootInvoice->appendChild($contractReference);
+    }
+
+    /**
+     * Add the exchange rate from the invoice currency to the tax currency
+     * (cac:TaxExchangeRate), when the two differ. ZATCA expects it directly
+     * after the document-level allowances and charges.
+     */
+    protected function addTaxExchangeRate(DOMDocument $dom, DOMElement $rootInvoice, InvoiceData $invoiceData): void
+    {
+        $rate = $invoiceData->getTaxExchangeRate();
+
+        if ($rate === null || $invoiceData->getDocumentCurrencyCode() === $invoiceData->getTaxCurrencyCode()) {
+            return;
+        }
+
+        $exchangeRate = $dom->createElement('cac:TaxExchangeRate');
+        $this->appendElement($dom, $exchangeRate, 'cbc:SourceCurrencyCode', $invoiceData->getDocumentCurrencyCode());
+        $this->appendElement($dom, $exchangeRate, 'cbc:TargetCurrencyCode', $invoiceData->getTaxCurrencyCode());
+        $this->appendElement($dom, $exchangeRate, 'cbc:CalculationRate', Money::format($rate));
+        $rootInvoice->appendChild($exchangeRate);
     }
 
     /**
@@ -229,6 +291,18 @@ class ZatcaInvoice
         $pihBinaryObject->setAttribute('mimeCode', 'text/plain');
         $pihBinaryObject->setAttribute('filename', 'base64');
 
+        // Custom document references. They must come BEFORE the QR reference:
+        // the signer removes the QR and signature blocks to compute the hash
+        // and re-inserts them together, directly before the supplier party.
+        // Anything placed between them would change the whitespace ZATCA
+        // sees when it recomputes the hash (invalid-invoice-hash).
+        foreach ($invoiceData->getDocumentReferences() as $reference) {
+            $documentReference = $dom->createElement('cac:AdditionalDocumentReference');
+            $this->appendElement($dom, $documentReference, 'cbc:ID', $reference['id'] ?? '');
+            $this->appendElementIfNotEmpty($dom, $documentReference, 'cbc:DocumentType', (string)($reference['type'] ?? ''));
+            $rootInvoice->appendChild($documentReference);
+        }
+
         // Add empty QR (QR Code) element AdditionalDocumentReference (will be replaced with the actual QR code later in signer)
         $qrAdditionalDocRef = $dom->createElement('cac:AdditionalDocumentReference');
         $rootInvoice->appendChild($qrAdditionalDocRef);
@@ -240,14 +314,6 @@ class ZatcaInvoice
         $qrBinaryObject = $this->appendElement($dom, $attachment, 'cbc:EmbeddedDocumentBinaryObject', '');
         $qrBinaryObject->setAttribute('mimeCode', 'text/plain');
         $qrBinaryObject->setAttribute('filename', 'base64');
-
-        // Add custom document references
-        foreach ($invoiceData->getDocumentReferences() as $reference) {
-            $documentReference = $dom->createElement('cac:AdditionalDocumentReference');
-            $this->appendElement($dom, $documentReference, 'cbc:ID', $reference['id'] ?? '');
-            $this->appendElementIfNotEmpty($dom, $documentReference, 'cbc:DocumentType', (string)($reference['type'] ?? ''));
-            $rootInvoice->appendChild($documentReference);
-        }
     }
 
     /**
@@ -376,7 +442,19 @@ class ZatcaInvoice
         if ($buyer->getRegistrationName() !== '') {
             $partyLegalEntity = $dom->createElement('cac:PartyLegalEntity');
             $this->appendElement($dom, $partyLegalEntity, 'cbc:RegistrationName', $buyer->getRegistrationName());
+            // Company legal form (KSA-40)
+            $this->appendElementIfNotEmpty($dom, $partyLegalEntity, 'cbc:CompanyLegalForm', $buyer->getCompanyLegalForm());
             $party->appendChild($partyLegalEntity);
+        }
+
+        // Buyer contact (optional): name, telephone, e-mail, note.
+        if ($buyer->hasContact()) {
+            $contact = $dom->createElement('cac:Contact');
+            $this->appendElementIfNotEmpty($dom, $contact, 'cbc:Name', $buyer->getContactName());
+            $this->appendElementIfNotEmpty($dom, $contact, 'cbc:Telephone', $buyer->getContactTelephone());
+            $this->appendElementIfNotEmpty($dom, $contact, 'cbc:ElectronicMail', $buyer->getContactEmail());
+            $this->appendElementIfNotEmpty($dom, $contact, 'cbc:Note', $buyer->getContactNote());
+            $party->appendChild($contact);
         }
 
         // UBL requires cac:AccountingCustomerParty. For an unidentified walk-in
@@ -469,6 +547,16 @@ class ZatcaInvoice
                 }
 
                 $this->appendElementIfNotEmpty($dom, $paymentMeansElement, 'cbc:PaymentID', (string)($paymentMeans['payment_id'] ?? ''));
+
+                // Payment account identifier (BT-84) and payment terms (KSA-22)
+                $account = (string)($paymentMeans['account_id'] ?? '');
+                $terms = (string)($paymentMeans['payment_terms'] ?? '');
+                if ($account !== '' || $terms !== '') {
+                    $payeeAccount = $dom->createElement('cac:PayeeFinancialAccount');
+                    $this->appendElementIfNotEmpty($dom, $payeeAccount, 'cbc:ID', $account);
+                    $this->appendElementIfNotEmpty($dom, $payeeAccount, 'cbc:PaymentNote', $terms);
+                    $paymentMeansElement->appendChild($payeeAccount);
+                }
 
                 $rootInvoice->appendChild($paymentMeansElement);
             }
@@ -624,31 +712,25 @@ class ZatcaInvoice
             // LineExtensionAmount is the NET line amount (gross - line allowance).
             $this->appendElementWithCurrency($dom, $invoiceLine, 'cbc:LineExtensionAmount', $line->getTaxExclusiveAmount(), $invoiceData->getDocumentCurrencyCode());
 
-            // Line-level allowance (BG-27) and charge (BG-28). Must sit between
+            // Line-level allowances (BG-27) and charges (BG-28). Must sit between
             // LineExtensionAmount and TaxTotal per the UBL InvoiceLine order.
-            if ($line->getAllowanceAmount() > 0) {
-                $ac = $dom->createElement('cac:AllowanceCharge');
-                $this->appendElement($dom, $ac, 'cbc:ChargeIndicator', 'false');
-                $this->appendElementIfNotEmpty($dom, $ac, 'cbc:AllowanceChargeReasonCode', $line->getAllowanceReasonCode());
-                $this->appendElementIfNotEmpty($dom, $ac, 'cbc:AllowanceChargeReason', $line->getAllowanceReason());
-                $this->appendElementWithCurrency($dom, $ac, 'cbc:Amount', $line->getAllowanceAmount(), $invoiceData->getDocumentCurrencyCode());
-                $invoiceLine->appendChild($ac);
+            foreach ($line->getAllowances() as $allowance) {
+                $invoiceLine->appendChild(
+                    $this->createLineAllowanceChargeElement($dom, $allowance, false, $invoiceData->getDocumentCurrencyCode())
+                );
             }
 
-            if ($line->getChargeAmount() > 0) {
-                if ($line->getChargeReasonCode() === '' || $line->getChargeReason() === '') {
+            foreach ($line->getCharges() as $charge) {
+                if (($charge['reason_code'] ?? '') === '' || ($charge['reason'] ?? '') === '') {
                     throw new InvalidArgumentException(
                         "Invoice line {$line->getId()} has a charge but no reason/reason code; "
                         . 'call setChargeReason() and setChargeReasonCode() (UNTDID 7161) (BR-KSA-20, BR-KSA-22).'
                     );
                 }
 
-                $ac = $dom->createElement('cac:AllowanceCharge');
-                $this->appendElement($dom, $ac, 'cbc:ChargeIndicator', 'true');
-                $this->appendElement($dom, $ac, 'cbc:AllowanceChargeReasonCode', $line->getChargeReasonCode());
-                $this->appendElement($dom, $ac, 'cbc:AllowanceChargeReason', $line->getChargeReason());
-                $this->appendElementWithCurrency($dom, $ac, 'cbc:Amount', $line->getChargeAmount(), $invoiceData->getDocumentCurrencyCode());
-                $invoiceLine->appendChild($ac);
+                $invoiceLine->appendChild(
+                    $this->createLineAllowanceChargeElement($dom, $charge, true, $invoiceData->getDocumentCurrencyCode())
+                );
             }
 
             // Tax total for line
@@ -703,6 +785,30 @@ class ZatcaInvoice
     }
 
     /**
+     * Build a line-level cac:AllowanceCharge (BG-27 / BG-28), with the
+     * optional percentage (BT-138 / BT-143) and base amount (BT-137 / BT-142).
+     */
+    protected function createLineAllowanceChargeElement(DOMDocument $dom, array $allowanceCharge, bool $isCharge, string $currency): DOMElement
+    {
+        $element = $dom->createElement('cac:AllowanceCharge');
+        $this->appendElement($dom, $element, 'cbc:ChargeIndicator', $isCharge ? 'true' : 'false');
+        $this->appendElementIfNotEmpty($dom, $element, 'cbc:AllowanceChargeReasonCode', (string)($allowanceCharge['reason_code'] ?? ''));
+        $this->appendElementIfNotEmpty($dom, $element, 'cbc:AllowanceChargeReason', (string)($allowanceCharge['reason'] ?? ''));
+
+        if (isset($allowanceCharge['multiplier'])) {
+            $this->appendElement($dom, $element, 'cbc:MultiplierFactorNumeric', (string)$allowanceCharge['multiplier']);
+        }
+
+        $this->appendElementWithCurrency($dom, $element, 'cbc:Amount', (float)$allowanceCharge['amount'], $currency);
+
+        if (isset($allowanceCharge['base_amount'])) {
+            $this->appendElementWithCurrency($dom, $element, 'cbc:BaseAmount', (float)$allowanceCharge['base_amount'], $currency);
+        }
+
+        return $element;
+    }
+
+    /**
      * Add one zero-value invoice line per deducted prepayment invoice
      * (§9.5, BR-KSA-73 to 82).
      */
@@ -738,7 +844,7 @@ class ZatcaInvoice
             $taxSubtotal = $dom->createElement('cac:TaxSubtotal');
             $this->appendElementWithCurrency($dom, $taxSubtotal, 'cbc:TaxableAmount', $prepayment['taxable_amount'], $currency);
             $this->appendElementWithCurrency($dom, $taxSubtotal, 'cbc:TaxAmount', $prepayment['tax_amount'], $currency);
-            $taxSubtotal->appendChild($this->createPrepaymentTaxCategory($dom, 'cac:TaxCategory', $prepayment));
+            $taxSubtotal->appendChild($this->createPrepaymentTaxCategory($dom, 'cac:TaxCategory', $prepayment, true));
             $taxTotal->appendChild($taxSubtotal);
             $invoiceLine->appendChild($taxTotal);
 
@@ -758,11 +864,17 @@ class ZatcaInvoice
     /**
      * Prepayment VAT category; the rate is always present (BR-KSA-75 to 78).
      */
-    protected function createPrepaymentTaxCategory(DOMDocument $dom, string $name, array $prepayment): DOMElement
+    protected function createPrepaymentTaxCategory(DOMDocument $dom, string $name, array $prepayment, bool $withExemptionReason = false): DOMElement
     {
         $taxCategory = $dom->createElement($name);
         $this->appendElement($dom, $taxCategory, 'cbc:ID', $prepayment['tax_category']);
         $this->appendElement($dom, $taxCategory, 'cbc:Percent', number_format($prepayment['tax_percent'], 2, '.', ''));
+
+        // Prepayment exemption reason code (KSA-41) and text (KSA-42).
+        if ($withExemptionReason && ($prepayment['tax_exemption_reason_code'] ?? null) !== null) {
+            $this->appendElement($dom, $taxCategory, 'cbc:TaxExemptionReasonCode', $prepayment['tax_exemption_reason_code']);
+            $this->appendElementIfNotEmpty($dom, $taxCategory, 'cbc:TaxExemptionReason', (string)($prepayment['tax_exemption_reason'] ?? ''));
+        }
 
         $taxScheme = $dom->createElement('cac:TaxScheme');
         $this->appendElement($dom, $taxScheme, 'cbc:ID', 'VAT');
@@ -800,7 +912,7 @@ class ZatcaInvoice
 
     /**
      * Build a VAT category element (cac:TaxCategory / cac:ClassifiedTaxCategory).
-     * Out-of-scope (O) carries no rate; exemption reasons go on the VAT breakdown only.
+     * Out-of-scope (O) carries a 0.00 rate; exemption reasons go on the VAT breakdown only.
      */
     protected function createTaxCategoryElement(
         DOMDocument $dom,

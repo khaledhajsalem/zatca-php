@@ -207,6 +207,44 @@ EOL;
     }
 
     /**
+     * Get the private key as a PEM string, without writing it to disk.
+     *
+     * Use this to pass the key straight to an encrypted store. The key is
+     * not protected by a passphrase; treat the returned string as a secret.
+     *
+     * @throws CertificateBuilderException If no key was generated or the export fails.
+     */
+    public function getPrivateKey(): string {
+        if (!$this->privateKey) {
+            throw new CertificateBuilderException('Private key not generated. Call generate() first.');
+        }
+
+        /** @var resource|\OpenSSLAsymmetricKey $privateKey */
+        $privateKey = $this->privateKey;
+
+        if (openssl_pkey_export($privateKey, $pem)) {
+            return $pem;
+        }
+
+        // Some installations (notably on Windows) cannot export a key without
+        // an explicit OpenSSL configuration file. Retry with a minimal one.
+        $this->getOpenSslErrors();
+        $configFile = $this->createConfigFile();
+
+        try {
+            if (!openssl_pkey_export($privateKey, $pem, null, ['config' => $configFile])) {
+                throw new CertificateBuilderException('Private key export failed: ' . $this->getOpenSslErrors());
+            }
+        } finally {
+            if (file_exists($configFile)) {
+                unlink($configFile);
+            }
+        }
+
+        return $pem;
+    }
+
+    /**
      * Save private key to a file.
      */
     public function savePrivateKey(string $path): void {

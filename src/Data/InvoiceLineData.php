@@ -2,6 +2,7 @@
 
 namespace KhaledHajSalem\Zatca\Data;
 
+use KhaledHajSalem\Zatca\Support\AllowanceCharge;
 use KhaledHajSalem\Zatca\Support\Money;
 use KhaledHajSalem\Zatca\Support\TaxCategory;
 
@@ -34,6 +35,8 @@ class InvoiceLineData
     protected float $priceDiscount = 0.0;
     protected ?float $baseQuantity = null;
     protected array $taxCategories = [];
+    protected array $allowances = [];
+    protected array $charges = [];
     protected string $taxCategory = TaxCategory::STANDARD;
     protected ?string $taxExemptionReasonCode = null;
     protected ?string $taxExemptionReason = null;
@@ -366,6 +369,102 @@ class InvoiceLineData
         return $this->baseQuantity;
     }
 
+    /**
+     * Add a line-level allowance (BG-27). A line may carry several.
+     *
+     * Keys: amount, reason (default "discount"), reason_code (UNTDID 5189),
+     * base_amount + multiplier (percentage; both or neither, amount is
+     * computed when omitted).
+     *
+     * setAllowanceAmount() remains available for a single plain discount;
+     * it is emitted first, followed by the allowances added here.
+     *
+     * @throws \InvalidArgumentException For inconsistent base amount/percentage.
+     */
+    public function addAllowance(array $allowance): self
+    {
+        $allowance = AllowanceCharge::normalize($allowance);
+        $allowance['reason'] = ($allowance['reason'] ?? '') !== '' ? $allowance['reason'] : 'discount';
+
+        $this->allowances[] = $allowance;
+        return $this;
+    }
+
+    /**
+     * Add a line-level charge (BG-28). A line may carry several.
+     *
+     * Same keys as addAllowance(); `reason` and `reason_code` (UNTDID 7161)
+     * are required (BR-KSA-20, BR-KSA-22).
+     *
+     * @throws \InvalidArgumentException For a missing reason/reason code or
+     *         inconsistent base amount/percentage.
+     */
+    public function addCharge(array $charge): self
+    {
+        if (($charge['reason_code'] ?? '') === '' || ($charge['reason'] ?? '') === '') {
+            throw new \InvalidArgumentException(
+                "Invoice line charges require 'reason' and 'reason_code' (UNTDID 7161) (BR-KSA-20, BR-KSA-22)."
+            );
+        }
+
+        $this->charges[] = AllowanceCharge::normalize($charge);
+        return $this;
+    }
+
+    /**
+     * Every allowance of the line: the one set with setAllowanceAmount()
+     * (if any) followed by those added with addAllowance().
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAllowances(): array
+    {
+        $allowances = [];
+
+        if ($this->allowanceAmount > 0) {
+            $allowances[] = [
+                'amount' => Money::round($this->allowanceAmount),
+                'reason' => $this->allowanceReason,
+                'reason_code' => $this->allowanceReasonCode,
+            ];
+        }
+
+        return array_merge($allowances, $this->allowances);
+    }
+
+    /**
+     * Every charge of the line: the one set with setChargeAmount() (if any)
+     * followed by those added with addCharge().
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getCharges(): array
+    {
+        $charges = [];
+
+        if ($this->chargeAmount > 0) {
+            $charges[] = [
+                'amount' => Money::round($this->chargeAmount),
+                'reason' => $this->chargeReason,
+                'reason_code' => $this->chargeReasonCode,
+            ];
+        }
+
+        return array_merge($charges, $this->charges);
+    }
+
+    /** Sum of all line allowances (BT-136). */
+    public function getTotalAllowanceAmount(): float
+    {
+        return Money::round(array_sum(array_column($this->getAllowances(), 'amount')));
+    }
+
+    /** Sum of all line charges (BT-141). */
+    public function getTotalChargeAmount(): float
+    {
+        return Money::round(array_sum(array_column($this->getCharges(), 'amount')));
+    }
+
     public function addTaxCategory(array $taxCategory): self
     {
         $this->taxCategories[] = $taxCategory;
@@ -389,7 +488,9 @@ class InvoiceLineData
         $this->chargeAmount = Money::round($this->chargeAmount);
         // BR-KSA-EN16931-11: quantity × (net price / base quantity).
         $this->lineExtensionAmount = Money::round($this->quantity * $this->getNetPrice() / ($this->baseQuantity ?? 1.0));
-        $this->taxExclusiveAmount = Money::round($this->lineExtensionAmount - $this->allowanceAmount + $this->chargeAmount);
+        $this->taxExclusiveAmount = Money::round(
+            $this->lineExtensionAmount - $this->getTotalAllowanceAmount() + $this->getTotalChargeAmount()
+        );
         $this->taxAmount = Money::round($this->taxExclusiveAmount * ($this->getTaxPercent() / 100));
         $this->taxInclusiveAmount = Money::round($this->taxExclusiveAmount + $this->taxAmount);
 
